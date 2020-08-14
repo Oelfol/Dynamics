@@ -1,0 +1,987 @@
+"""
+August '20
+Code to simulate dynamics of Heisenberg/Ising spin chains
+with exact classical solutions and noisy quantum simulations in Qiskit Aer
+"""
+
+
+import numpy as np
+import qiskit as q
+import qiskit.extensions.unitary as qeu
+from qiskit.quantum_info.operators import Operator
+from cycler import cycler
+import cProfile
+from qiskit import QuantumRegister, QuantumCircuit, ClassicalRegister, Aer, execute, IBMQ
+import random
+import itertools
+import math
+import matplotlib
+import time
+import warnings
+import scipy.linalg, numpy.linalg
+import matplotlib.pyplot as plt
+import scipy.sparse as sps
+import scipy.sparse.linalg as sla
+import scipy.linalg as sl
+warnings.filterwarnings('ignore')
+from qiskit.providers.aer.noise import NoiseModel
+from qiskit.providers.aer import noise
+
+# ========================================= IBM account and noise model setup ======================================================= >
+
+IBMQ.enable_account("TOKEN HERE")
+
+provider = IBMQ.get_provider(hub='ibm-q', group='open', project='main')
+simulator = Aer.get_backend('qasm_simulator')
+
+
+def qc_noise_model(dev_name):
+    # regular noise model from the backend
+
+    device = provider.get_backend(dev_name)
+    properties = device.properties()
+    gate_lengths = noise.device.parameters.gate_length_values(properties)
+    noise_model = NoiseModel.from_backend(properties, gate_lengths=gate_lengths)
+    basis_gates = noise_model.basis_gates
+    coupling_map = device.configuration().coupling_map
+    return device, noise_model, basis_gates, coupling_map
+
+dev_name = 'ibmq_16_melbourne'
+device, noise_model, basis_gates, coupling_map = qc_noise_model(dev_name)
+
+
+# ==================================== Plotting Helpers ============================================================================= >
+
+colors = ['g', 'k', 'maroon', 'mediumblue', 'slateblue', 'limegreen', 'b', 'r', 'olive']
+custom_cycler = (cycler(color=colors) + cycler(lw=[2]*len(colors)))
+
+
+SMALL_SIZE = 12
+MEDIUM_SIZE = 15
+BIGGER_SIZE = 25
+plt.rc('font', size=SMALL_SIZE)
+plt.rc('axes', titlesize=SMALL_SIZE)
+plt.rc('axes', labelsize=MEDIUM_SIZE)
+plt.rc('xtick', labelsize=SMALL_SIZE)
+plt.rc('ytick', labelsize=SMALL_SIZE)
+plt.rc('legend', fontsize=SMALL_SIZE)
+plt.rc('figure', titlesize=BIGGER_SIZE)
+
+
+def set_up_axes(num_axes):
+
+    if num_axes == 1:
+        fig, ax = plt.subplots()
+        ax.set_prop_cycle(custom_cycler)
+        ax.margins(x=0)
+        return fig, ax
+
+    elif num_axes == 2:
+        fig, (ax1, ax2) = plt.subplots(2, 1)
+        ax1.set_prop_cycle(custom_cycler)
+        ax2.set_prop_cycle(custom_cycler)
+        ax1.margins(x=0)
+        ax2.margins(x=0)
+        fig.subplots_adjust(hspace=0)
+        return fig, (ax1, ax2)
+
+
+def occ_plotter(chosen_states, j, data, n, total_time, dt):
+
+    fig, ax = set_up_axes(1)
+    for state in chosen_states:
+        x1 = [i * abs(j) * dt for i in range(total_time)]
+        dex = chosen_states.index(state)
+        ax.plot(x1, data[dex,:].toarray().tolist()[0], label=np.binary_repr(state).zfill(n), linewidth=2)
+    plot_dataset_byrows(ax, 'States', 'Probability', r'$\it{Jt}$')
+    plt.show()
+
+
+def two_point_correlations_plotter(alpha, beta, j, dt, chosen_pairs, data_real, data_imag):
+
+    re_label = r'$Re {\langle S_{' + alpha + '}}(t) $' + r'$S_{' + beta + '}(0) $' + r'$\rangle $'
+    im_label = r'$Im {\langle S_{' + alpha + '}}(t) $' + r'$S_{' + beta  + '}(0)$' + r'$\rangle $'
+    fig, (ax1, ax2) = set_up_axes(2)
+    scaler = j * dt
+    for x in chosen_pairs:
+        x1 = [i * scaler for i in range(len(data_real.toarray()[chosen_pairs.index(x)][:].tolist()))]
+        ax1.plot(x1, data_real.toarray()[chosen_pairs.index(x)][:].tolist(), label=str(x))
+        x2 = [i * scaler for i in range(len(data_imag.toarray()[chosen_pairs.index(x)][:].tolist()))]
+        ax2.plot(x2, data_imag.toarray()[chosen_pairs.index(x)][:].tolist(), label=str(x))
+    plot_dataset_byrows(ax1, 'Site Pairs', re_label, 'Jt')
+    plot_dataset_byrows(ax2, 'Site Pairs', im_label, 'Jt')
+    plt.show()
+
+
+def total_magnetization_plotter(j, total_time, dt, data):
+
+    fig, ax = set_up_axes(1)
+    x1 = [i * j * dt for i in range(total_time)]
+    ax.plot(x1, data.toarray()[0][:].tolist(), linewidth=2)
+    plt.xlabel(r'$\it{Jt}$')
+    plt.ylabel('Total Magnetization')
+    plt.show()
+
+
+def all_site_magnetization_plotter(n, j, dt, total_time, data):
+
+    fig, ax = set_up_axes(1)
+    for site in range(n):
+        x1 = [i * j * dt for i in range(total_time)]
+        ax.plot(x1, data.toarray()[site][:].tolist(), linewidth=2, label=site)
+    plot_dataset_byrows(ax, 'Sites', 'Magnetization', r'$\it{Jt}$')
+    plt.show()
+
+# ========================================= Pauli matrices and pseudospin operators ================================================ >
+
+sx = sps.csc_matrix(np.array([[0, 1], [1, 0]]))
+sy = sps.csc_matrix(np.complex(0, 1) * np.array([[0, -1], [1, 0]]))
+sz = sps.csc_matrix(np.array([[1, 0], [0, -1]]))
+identity = sps.csc_matrix(np.eye(2, dtype=complex))
+plus = sps.csc_matrix(sx * (1 / 2) + np.complex(0, 1) * sy * (1 / 2))
+minus = sps.csc_matrix(sx * (1 / 2) - np.complex(0, 1) * sy * (1 / 2))
+
+# ======================================= Helper functions for classical simulations =============================================== >
+
+
+def gen_pairs(n, choice, auto, open_chain):
+    """
+    choice: nearest or next-nearest exchange 'NN' or 'NNN'
+    auto: whether needing autocorrelations, not for hamiltonian matrix
+    open_chain: includes periodic boundary conditions of False
+    """
+    nn, nnn, autos = [], [], []
+    for p in range(n - 1):
+        if auto:
+            autos.append((p, p))
+        nn.append((p, p + 1))
+    if auto:
+        autos.append((n - 1, n - 1))
+    if n > 2 and not open_chain:
+        nn.append((0, n - 1))
+    if choice:
+        if n > 3:
+            for f in range(n - 2):
+                nnn.append((f, f + 2))
+        if n > 4 and not open_chain:
+            nnn.append((0, n - 2))
+            nnn.append((1, n - 1))
+
+    return nn, nnn, autos
+
+
+def spin_op(operator, site, n, unity):
+    """
+    Generates Pauli spin operators & spin-plus/-minus operators
+    :param operator: operator {'x','y','z','+','-'} (str)
+    :param site: site index of operator (int)
+    :param n: number of sites (int)
+    :param unity: sets h-bar/2 to unity (bool)
+    """
+    array = identity
+    ops_list = ['x', 'y', 'z', '+', '-']
+    pauli_ops = [(1 / 2) * sx, (1 / 2) * sy, (1 / 2) * sz, plus, minus]
+
+    if unity:
+        pauli_ops = [sx, sy, sz, 2 * plus, 2 * minus]
+    if site == (n - 1):
+        array = pauli_ops[ops_list.index(operator)]
+    for x in reversed(range(0, n - 1)):
+        if x == site:
+            array = sps.kron(array, pauli_ops[ops_list.index(operator)])
+        else:
+            array = sps.kron(array, identity)
+
+    return array
+
+
+def gen_m(leng, steps):
+    # Generate an empty data matrix
+    return sps.lil_matrix(np.zeros([leng, steps]), dtype=complex)
+
+
+def plot_dataset_byrows(ax, legendtitle, ylabel, xlabel):
+
+    ax.legend(loc='right', title=legendtitle, fontsize='x-large') # need to make legend optional
+    ax.set_ylabel(ylabel, fontsize='x-large')
+    ax.set_xlabel(xlabel, fontsize='x-large')
+
+
+def init_spin_state(initialpsi, num_states):
+    # initial psi is the computational-basis index
+
+    psi_0 = np.zeros([num_states, 1], complex)
+    psi_0[initialpsi, 0] = 1
+    return sps.csc_matrix(psi_0)
+
+# ========================================== Classical Spin Chains ================================================================== >
+
+class ClassicalSpinChain:
+
+    def __init__(self, j=0.0, j2=0.0, bg=0.0, a=0.0, n=0, open_chain=False, unity=False, choice=False, ising=False, paper='', transverse=False):
+        # include a choice for autocorrelations
+        self.j = j                                # coupling constant
+        self.j2 = j2                              # how much to scale next-nearest coupling
+        self.bg = bg                              # magnetic field strength
+        self.a = a                                # anisotropy constant jz/j (xxy model, otherwise ignore)
+        self.n = n                                # sites
+        self.open_chain = open_chain              # whether open chain
+        self.states = 2 ** n                      # number of basis states
+        self.unity = unity                        # whether h-bar/2 == 1 (h-bar == 1 elsewise)
+        self.choice = choice                      # whether next-nearest, bool
+        self.ising = ising                        # for ising model
+        self.paper = paper                        # refer to settings for a specific paper
+        self.transverse = transverse              # whether transverse field ising model
+
+        self.hamiltonian = sps.lil_matrix(np.zeros([2 ** n, 2 ** n], complex))
+        neighbors, nn_neighbors, autos = gen_pairs(self.n, self.choice, False, self.open_chain)
+        multipliers = [1, 1, self.a]
+
+        ops = ['x', 'y', 'z']
+        if ising:
+            ops = ['z']
+
+        for y in neighbors:
+            for op in ops:
+                dex = ops.index(op)
+                s1 = spin_op(op, y[0], self.n, self.unity)
+                s2 = spin_op(op, y[1], self.n, self.unity)
+                self.hamiltonian += s1.dot(s2) * self.j * multipliers[dex]
+            for z in nn_neighbors:
+                for op in ops:
+                    dex = ops.index(op)
+                    s1 = spin_op(op, z[0], self.n, self.unity)
+                    s2 = spin_op(op, z[1], self.n, self.unity)
+                    self.hamiltonian += s1.dot(s2) * self.j * multipliers[dex] * self.j2
+        for x in range(self.n):
+            if self.bg != 0 and self.transverse == False:
+                s_final = spin_op('z', x, self.n, self.unity) * self.bg / 2
+                self.hamiltonian += s_final
+            elif self.bg !=0 and self.transverse == True:
+                s_final = spin_op('x', x, self.n, self.unity) * self.bg / 2
+                self.hamiltonian += s_final
+
+        self.hamiltonian = sps.csc_matrix(self.hamiltonian)
+
+
+    def eig(self):
+
+        h = self.hamiltonian.toarray()
+        evals, evect = sl.eigh(h)[0], sl.eigh(h)[1]
+        return evals, sps.csc_matrix(evect)
+
+
+    def equal_time_correlations(self, total_time, dt, psi0, op_order):
+
+        nn, nnn, auto = gen_pairs(self.n, self.choice, True, self.open_chain)
+        pairs_ = nn + nnn + auto
+        data = gen_m(len(pairs_), total_time)
+
+        for t in range(total_time):
+            if self.unity:
+                t = t / 2 # gonna be an issue with graphs here
+            u = sl.expm(self.hamiltonian * dt * t * (-1j))
+            bra = np.conj(u.dot(psi0).T)
+            for pair in pairs_:
+                si = spin_op(op_order[0], pair[0], self.n, self.unity)
+                sj = spin_op(op_order[1], pair[1], self.n, self.unity)
+                ket = si.dot(sj.dot(u.dot(psi0)))
+                res = bra.dot(ket).toarray()[0][0]
+                data[pairs_.index(pair), t] = np.conj(res) * res
+
+        # Plot the results
+        fig, ax = plt.subplots()
+        for x in pairs_:
+            ax.plot(data.toarray()[pairs_.index(x)][:], label=str(x), linewidth=2) # where is j scaling here?
+        plot_dataset_byrows(ax, 'Site Pairs', '<S_i(' + op_order[0] + ')S_j(' + op_order[1] + ')', 'Time')
+        plt.title('Equal-Time Correlations')
+        plt.show()
+
+
+    def two_point_correlations_cl(self, total_time, dt, psi0, op_order, pairs=[]):
+        if pairs == []:
+            # if wanting to generate all pairs, feed in none
+            nn, nnn, auto = gen_pairs(self.n, self.choice, True, self.open_chain)
+            pairs = nn + nnn + auto
+        dyn_data_real, dyn_data_imag = gen_m(len(pairs), total_time), gen_m(len(pairs), total_time)
+
+        # Account for differences between examples from papers
+        pseudo_constant = 1
+        if self.paper in ['tachinno']:
+            pseudo_constant = 4
+
+        for t in range(total_time):
+            t_ = self.j * t
+            u = sl.expm(self.hamiltonian * dt * t_ * (-1j))
+            u_dag = sl.expm(self.hamiltonian * dt * t_ * (1j))
+            psi_dag = np.conj(psi0).transpose()
+            for x in range(len(pairs)):
+                si = spin_op(op_order[0], pairs[x][0], self.n, self.unity)
+                sj = spin_op(op_order[1], pairs[x][1], self.n, self.unity)
+                ket = u_dag.dot(si.dot(u.dot(sj.dot(psi0))))
+                res = psi_dag.dot(ket).toarray()[0][0]
+                dyn_data_real[x, t] = np.real(res) / pseudo_constant
+                dyn_data_imag[x, t] = np.imag(res) / pseudo_constant
+
+        # Plot the results
+        two_point_correlations_plotter(op_order[0], op_order[1], abs(self.j) , dt, pairs, dyn_data_real, dyn_data_imag)
+
+
+    def occupation_probabilities(self, total_time=0, dt=0.0, initialstate=None, chosen_states=[]):
+
+        psi0 = initialstate
+        basis_matrix = sps.csc_matrix(np.eye(self.states))
+        data = gen_m(self.states, total_time)
+        for t in range(total_time):
+            t_ = t * self.j
+            u = sl.expm(self.hamiltonian * dt * t_ * (-1j))
+            psi_t = u.dot(psi0)
+            for i in range(self.states):
+                basis_bra = (basis_matrix[i, :])#.transpose()
+                probability = (basis_bra.dot(psi_t)).toarray()[0][0]
+                probability = ((np.conj(psi_t).transpose()).dot(np.conj(basis_bra).transpose())).toarray()[0][0] * probability
+                data[i, t] = probability
+        # Plot the results
+        fig, ax = set_up_axes(1)
+        for x in chosen_states:
+            x1 = [i * abs(self.j) * dt for i in range(len(data.toarray()[x][:].tolist()))]
+            ax.plot(x1, data.toarray()[x][:].tolist(), label=np.binary_repr(x).zfill(self.n), linewidth=2)
+
+        ax.legend(loc='right', title='States')
+        ax.set_ylabel('Probability')
+        ax.set_xlabel('$\it{Jt}$')
+        plt.show()
+
+
+    def magnetization_per_site(self, total_time, dt, psi0, site):
+
+        # Account for differences between examples from papers
+        pseudo_constant = 1.0
+        if self.paper in ['tachinno']:
+            pseudo_constant = 2.0
+
+        data = gen_m(1, total_time)
+        for t in range(total_time):
+            t_ = t * self.j
+            u = sl.expm(self.hamiltonian * dt * t_ * (-1j))
+            bra = np.conj(u.dot(psi0).transpose())
+            s_z = spin_op('z', site, self.n, self.unity)
+            ket = s_z.dot(u.dot(psi0))
+            data[0, t] += (bra.dot(ket).toarray()[0][0]) / pseudo_constant
+        return data
+
+
+    def all_site_magnetization(self, total_time, dt, psi0):
+
+        data = gen_m(self.n, total_time)
+        for site in range(self.n):
+            site_data = self.magnetization_per_site(total_time, dt, psi0, site)
+            data[site, :] += site_data
+        # Plot the results
+        all_site_magnetization_plotter(self.n, abs(self.j), dt, total_time, data)
+
+
+    def total_magnetization(self, total_time, dt, psi0):
+
+        data = gen_m(1, total_time)
+        for site in range(self.n):
+            site_data = self.magnetization_per_site(total_time, dt, psi0, site)
+            data = data + site_data
+
+        # Plot the result
+        data = data.toarray().tolist()[0]
+        fig, ax = set_up_axes(1)
+        x1 = [i * self.j * dt for i in range(total_time)]
+        ax.plot(x1, data, linewidth=2)
+        plt.xlabel('$\it{Jt}$')
+        plt.ylabel('Total Magnetization')
+        plt.show()
+
+# ============================================== Helper functions for Quantum Sim =============================================== >
+
+
+def commutes(a, b):
+    # Test whether the hamiltonian commutes with itself
+
+    comm = a.dot(b) - b.dot(a)
+    comp = comm.toarray().tolist()
+    if max(comp) == 0:
+        return True
+    else:
+        return False
+
+def sort_counts(count, qs, shots):
+
+    vec = []
+    for i in range(2 ** qs):
+        binary = np.binary_repr(i).zfill(qs) #[::-1]
+        if binary in count.keys():
+            vec.append(count[binary] / shots)
+        else:
+            vec.append(0.0)
+
+    return vec
+
+
+def choose_control_gate(choice, qc, c, t):
+    # Applying chosen controlled unitary for correlations and magnetization
+
+    if choice == 'x':
+        qc.cx(control_qubit=c, target_qubit=t)
+    elif choice == 'y':
+        qc.cy(control_qubit=c, target_qubit=t)
+    elif choice == 'z':
+        qc.cz(control_qubit=c, target_qubit=t)
+
+
+def real_or_imag_measurement(qc, j):
+    # For ancilla-assisted measurements
+
+    if j == 0:
+        qc.h(0)
+    elif j == 1:
+        qc.rx(-1 * math.pi / 2, 0)
+
+
+def zz_operation(qc, a, b, delta):
+    # Helper for time evolution operator
+
+    qc.cx(a, b)
+    qc.rz(2 * delta, b)
+    qc.cx(a, b)
+
+
+def xx_operation(qc, a, b, delta):
+    # Helper for time evolution operator
+
+    qc.ry(math.pi / 2, a)
+    qc.ry(math.pi / 2, b)
+    qc.cx(a, b)
+    qc.rz(2 * delta, b)
+    qc.cx(a, b)
+    qc.ry(-1 * math.pi / 2, a)
+    qc.ry(-1 * math.pi / 2, b)
+
+
+def yy_operation(qc, a, b, delta):
+    # Helper for time evolution operator
+
+    qc.rx(math.pi / 2, a)
+    qc.rx(math.pi / 2, b)
+    qc.cx(a, b)
+    qc.rz(2 * delta, b)
+    qc.cx(a, b)
+    qc.rx(-1 * math.pi / 2, a)
+    qc.rx(-1 * math.pi / 2, b)
+
+
+def xyz_operation(qc, a, b, ancilla, j, t, dt, j2, trotter_steps, constant, ising, a_constant):
+    # Time evolving the system termwise by the elements in the hamiltonian
+
+    nnn_term = j2
+    if abs(a - b) == 1:
+        nnn_term = 1
+
+    if not ising:
+        xx_operation(qc, a + ancilla, b + ancilla, j * t * dt * nnn_term / (constant * trotter_steps))
+        yy_operation(qc, a + ancilla, b + ancilla, j * t * dt * nnn_term / (constant * trotter_steps))
+    zz_operation(qc, a + ancilla, b + ancilla, j * a_constant * t * dt * nnn_term / (constant * trotter_steps))
+
+
+# =================================================== Quantum Sim Spin Chains ================================================= >
+
+class QuantumSimSpinChain:
+
+    def __init__(self,j=0.0, bg=0.0, a = 1.0, n=0, j2=1, choice=True, open_chain=True, transverse = False, paper='', ising=False):
+
+        self.j = j                                             # coupling constant
+        self.bg = bg                                           # magnetic field strength
+        self.n = n                                             # number of spins
+        self.states = 2 ** n                                   # number of basis states
+        self.choice = choice                                   # whether to have next-nearest neighbors
+        self.a = a                                             # anisotropy jz / j
+        self.j2 = j2                                           # how much to scale next-nearest coupling
+        self.open_chain = open_chain                           # open chain = periodic boundary
+        self.transverse = transverse                           # for transverse field ising model
+        self.paper = paper                                     # direct reference for all the unique aspects of different papers
+        self.ising = ising                                     # Whether using the ising model for example
+        self.unity = False
+        if self.paper == 'francis':
+            self.unity = True
+
+        self.classical_hamiltonian = ClassicalSpinChain(j=self.j, j2=self.j2,
+                                                   bg=self.bg, a=self.a, n=self.n, open_chain=self.open_chain,
+                                                   unity=self.unity, choice=self.choice).hamiltonian
+        self.h_commutes = commutes(self.classical_hamiltonian, self.classical_hamiltonian)
+        self.pairs_nn, self.pairs_nnn, autos = gen_pairs(self.n, self.choice, False, self.open_chain)
+        self.total_pairs = self.pairs_nn + self.pairs_nnn
+
+
+    def init_state(self, qc, ancilla, initial_state):
+        # Initialize a circuit in the desired spin state
+        # Add a qubit if there is an ancilla measurement
+
+        state_temp = np.binary_repr(initial_state).zfill(self.n)[::-1]
+        anc = int(ancilla)
+        index = 0
+        for x in state_temp:
+            if x == '1':
+                qc.x(index + anc)
+            index += 1
+
+
+    def first_order_trotter(self, qc, dt, t, trotter_steps, ancilla):
+
+        if self.h_commutes:
+            trotter_steps = 1
+            print("H commutes, trotter_steps = 1")
+        if t == 0:
+            print("First order trotter in progress..")
+
+        # Address needed constants for particular paper
+        pseudo_constant_a = 1.0
+        mag_constant = 1.0
+        if self.paper == 'joel':
+            pseudo_constant_a = 4.0
+            mag_constant = 2.0
+
+        for step in range(trotter_steps):
+            for k in range(self.n):
+                if self.bg != 0.0:
+                    if self.transverse:
+                        qc.rx(self.bg * dt * t / (trotter_steps * mag_constant), k + ancilla)
+                    else:
+                        qc.rz(self.bg * dt * t / (trotter_steps * mag_constant), k + ancilla)
+            for x in self.total_pairs:
+                xyz_operation(qc, x[0], x[1], ancilla, self.j, t, dt, self.j2, trotter_steps * pseudo_constant_a, 1.0, self.ising, self.a)
+
+
+    def second_order_trotter(self, qc, dt, t, trotter_steps, ancilla):
+
+        if self.h_commutes:
+            trotter_steps = 1
+            print("H commutes, trotter_steps = 1")
+        if t == 0 :
+            print("Second order trotter in progress..")
+
+        # Address needed constants for particular paper
+        pseudo_constant_a = 1.0
+        mag_constant = 1.0
+        if self.paper in [ 'joel']:
+            pseudo_constant_a = 4.0
+            mag_constant = 2.0
+
+        for k in range(self.n):
+            if self.bg != 0.0:
+                if self.transverse:
+                    qc.rx(self.bg * dt * t / (trotter_steps * mag_constant), k + ancilla)
+                else:
+                    qc.rz(self.bg * dt * t / (trotter_steps * mag_constant), k + ancilla)
+
+        for step in range(trotter_steps):
+            for x in reversed(self.total_pairs[1:]):
+                xyz_operation(qc, x[0], x[1], ancilla, self.j, t, dt, self.j2, trotter_steps * pseudo_constant_a, 2.0, self.ising, self.a)
+
+            mid= self.total_pairs[0]
+            xyz_operation(qc, mid[0], mid[1], ancilla, self.j, t, dt, self.j2, trotter_steps * pseudo_constant_a, 1.0, self.ising, self.a)
+
+            for x in self.total_pairs[1:]:
+                xyz_operation(qc, x[0], x[1], ancilla, self.j, t, dt, self.j2, trotter_steps * pseudo_constant_a, 2.0, self.ising, self.a)
+
+
+    def run_circuit(self, anc, qc):
+
+        if anc == 1:
+            # All ancilla-assisted measurements
+            qc.measure(0, 0)
+
+            result = execute(qc, backend=simulator, shots=1024).result() #execute(qc, backend=simulator, shots=1024, noise_model=noise_model,
+                     #        basis_gates=basis_gates).result()
+            counts = [result.get_counts(i) for i in range(len(result.results))]
+            probs = sort_counts(counts[0], anc, 1024)
+
+            return (probs[0] - probs[1])
+
+        else:
+            # No ancilla (occupation probabilities)
+            for x in range(self.n):
+                qc.measure(x, x)
+
+            result = execute(qc, backend=simulator, shots=1024).result()
+            counts = [result.get_counts(i) for i in range(len(result.results))]
+            measurements = sort_counts(counts[0], self.n, 1024)
+
+            return measurements
+
+
+    def magnetization_per_site(self, t, dt, site, trotter_steps, initialstate, trotter_alg, hadamard=False):
+
+        qc = QuantumCircuit(self.n + 1, 1)
+        self.init_state(qc, True, initialstate)
+        qc.h(0)
+        if hadamard == True:
+            qc.h(2)   # ------------------------------------------------------------------> tachinno fig 5a , manually added hadamard
+        trotter_alg(qc, dt, t, trotter_steps, 1)
+        choose_control_gate('z', qc, 0, site + 1)
+        qc.h(0)
+        measurement = self.run_circuit(1, qc)
+
+        # Address needed constants for particular paper
+        pseudo_constant = 1
+        if self.paper in ['joel', 'tachinno']:
+            pseudo_constant = 2
+
+        return measurement / pseudo_constant
+
+
+    def all_site_magnetization(self, trotter_alg, trotter_steps, total_time=0, dt=0.0, initialstate=0, hadamard=False):
+        # Plot changes in magnetization for each site over total time
+
+        data = gen_m(self.n, total_time)
+
+        for t in range(total_time):
+            for site in range(self.n):
+                measurement = self.magnetization_per_site(t, dt, site, trotter_steps, initialstate, trotter_alg, hadamard=hadamard)
+                data[site, t] += (measurement)
+
+        # Plot the results
+        all_site_magnetization_plotter(self.n, abs(self.j), dt, total_time, data)
+
+
+    def total_magnetization(self, trotter_alg, trotter_steps, total_time = 0, dt = 0.0, initialstate=0):
+        # Plot changes in total magnetization over total time
+
+        data = gen_m(1, total_time)
+
+        for t in range(total_time):
+            total_magnetization = 0
+            for site in range(self.n):
+                measurement = self.magnetization_per_site(t, dt, site, trotter_steps, initialstate, trotter_alg)
+                total_magnetization += measurement
+            data[0, t] += total_magnetization
+
+        # Plot the results
+        total_magnetization_plotter(abs(self.j), total_time, dt, data)
+
+
+    def equal_time_correlations(self, trotter_alg, trotter_steps, total_t = 0, dt = 0.0, alpha ='', beta ='', initialstate = 0):
+
+        data_real, data_imag = gen_m(len(chosen_pairs), total_t), gen_m(len(chosen_pairs), total_t)
+        for pair in chosen_pairs:
+            for t in range(total_t):
+                for j in range(2):
+                    qc = QuantumCircuit(self.n + 1, 1)
+                    self.init_state(qc, anc, initialstate)
+                    qc.h(0)
+                    trotter_alg(qc, dt, t, trotter_steps, 0)
+                    choose_control_gate(beta, qc, 0, pair[1] + 1)
+                    choose_control_gate(alpha, qc, 0, pair[0] + 1)
+                    real_or_imag_measurement(qc, j)
+                    measurement = self.run_circuit(1, qc)
+                    if j == 0:
+                        data_real[chosen_pairs.index(pair), t] += measurement
+                    elif j == 1:
+                        data_imag[chosen_pairs.index(pair), t] += measurement
+
+        equal_time_correlations_plotter(alpha, beta)
+
+
+    def two_point_correlations(self, trotter_alg, trotter_steps, total_t, dt, alpha, beta, chosen_pairs, initialstate=0):
+
+        data_real, data_imag = gen_m(len(chosen_pairs), total_t), gen_m(len(chosen_pairs), total_t)
+
+        # Address needed constants for particular paper
+        pseudo_constant = 1.0
+        if self.paper in ['joel', 'tachinno']:
+            pseudo_constant = 4.0
+
+        for pair in chosen_pairs:
+            for t in range(total_t):
+                for j in range(2):
+                    qc = QuantumCircuit(self.n + 1, 1)
+                    self.init_state(qc, 1, initialstate)
+                    qc.h(0)
+                    choose_control_gate(beta, qc, 0, pair[1] + 1)
+                    trotter_alg(qc, dt, t, trotter_steps, 1)
+                    choose_control_gate(alpha, qc, 0, pair[0] + 1)
+                    real_or_imag_measurement(qc, j)
+                    measurement = self.run_circuit(1, qc) / pseudo_constant
+
+                    if j == 0:
+                        data_real[chosen_pairs.index(pair), t] += measurement
+                    elif j == 1:
+                        data_imag[chosen_pairs.index(pair), t] += measurement
+
+        # Plot the results
+        two_point_correlations_plotter(alpha, beta, abs(self.j), dt, chosen_pairs, data_real, data_imag)
+
+
+    def occupation_probabilities(self, trotter_alg, trotter_steps, total_time=0, dt=0.0, initialstate=0, chosen_states=[]):
+
+        data = gen_m(len(chosen_states), total_time)
+
+        for t in range(total_time):
+            qc = QuantumCircuit(self.n, self.n)
+            self.init_state(qc, 0, initialstate)
+            trotter_alg(qc, dt, t, trotter_steps, 0)
+            measurements = self.run_circuit(0, qc)
+            print(measurements)
+            for x in chosen_states:
+                data[chosen_states.index(x), t] = measurements[x]
+
+        # Plot the results
+        occ_plotter(chosen_states, abs(self.j), data, self.n, total_time, dt)
+
+
+def time_ev_op_decomp(qc, a, b, j, t):
+
+    qc.cx(control_qubit=a, target_qubit=b)
+    qc.rx(-2 * j * t - (math.pi / 2), a)
+    qc.rz(-2 * j * t, b)
+    qc.h(a)
+    qc.cx(control_qubit=a, target_qubit=b)
+    qc.h(a)
+    qc.rz(2 * j * t, b)
+    qc.cx(control_qubit=a, target_qubit=b)
+    qc.rx(math.pi / 2, a)
+    qc.rx(-1 * math.pi / 2, b)
+
+
+def four_site_ibmq(total_time, dt, j):
+    # For Francis Fig 5a
+
+    pairs = [(1, 1), (2, 1), (3, 1)]
+    data_real = gen_m(len(pairs), total_time)
+    data_imag = gen_m(len(pairs), total_time)
+
+    counting = 0
+    for pair in pairs:
+        for t in range(total_time):
+            for d in range(2):
+                counting += 1
+                print(counting)
+                qc = QuantumCircuit(5, 1)
+                qc.h(0)
+                qc.cx(control_qubit=0, target_qubit=pair[1])
+                time_ev_op_decomp(qc, 1, 2, j, t * dt)
+                time_ev_op_decomp(qc, 3, 4, j, t * dt)
+                qc.swap(2, 3)
+                time_ev_op_decomp(qc, 4, 1, j, t * dt)
+                time_ev_op_decomp(qc, 2, 3, j, t * dt)
+                qc.swap(2, 3)
+                qc.cx(control_qubit=0, target_qubit=pair[0])
+                if d == 0:
+                    qc.h(0)
+                elif d == 1:
+                    qc.rx(-1 * math.pi/2, 0)
+
+                qc.measure(0, 0)
+                result = execute(qc, backend=simulator, shots=1024, noise_model=noise_model,
+                             basis_gates=basis_gates,optimization_level=0).result()
+                counts = [result.get_counts(i) for i in range(len(result.results))]
+                sorted_counts = sort_counts(counts[0], 1, 1024)
+                measurement = sorted_counts[0] - sorted_counts[1]
+
+                if d == 0:
+                    data_real[pairs.index(pair), t] += measurement
+                elif d == 1:
+                    data_imag[pairs.index(pair), t] += measurement
+
+    print(data_real)
+    two_point_correlations_plotter('x', 'x', j, dt, pairs, data_real, data_imag)
+
+
+
+# simple check
+#spins0 = ClassicalSpinChain(j=1, j2=0, a=1, n=2, open_chain=False, unity=False, choice=False)
+#print(spins0.hamiltonian.toarray())
+
+# _______________________________________________________________________________________________________________________
+
+# + / - PROBLEM
+#CLASSICAL WORKS
+# Have to do quantum sim specially
+
+#CLASSICAL
+#spins1 = ClassicalSpinChain(j=1, j2=1, bg=0, a=1, n=2, open_chain=False, unity=False, choice=False)
+#psi0 = init_spin_state(1, spins1.states)
+#spins1.equal_time_correlations(100, 10**-1, psi0, '+-')
+
+#QUANTUM
+
+# _______________________________________________________________________________________________________________________
+
+# FRANCIS FIG 5a (Two Point Correlations)
+# CLASSICAL WORKS
+# QUANTUM WORKS, SPECIAL FUNCTION
+# Initial state is ferromagnetic ground state
+
+#CLASSICAL
+#spins2 = ClassicalSpinChain(j=-.84746, j2=1, bg=0, a=1, n=4, open_chain=False, unity=True, choice=False, paper='francis')
+#evals, evects = spins2.eig()
+#psi0 = evects[:, 0]
+#print(psi0.toarray())
+#spins2.two_point_correlations_cl(600, .01, psi0, 'xx', pairs=[(1, 1), (2, 1), (3, 1)])
+
+#QUANTUM - does not need trotter -- used noise model
+#four_site_ibmq(600, .01, 0.84746)
+#because have been "simplifying" hamiltonian_matrix be removing negative sign, have not seen that this decomposition assumes the hamiltonian_matrix has the
+#implicit negative sign, so .84746 is positive.
+
+
+# ______________________________________________________________________________________________________________________
+
+#TACHINNO FIG 5a  (All Site Magnetization)
+#CLASSICAL WORKS
+#QUANTUM 2ND ORDER WORKS
+#QUANTUM 2ST ORDER WORKS 
+# In tachinno, the arrows are actually referring to the computational basis states (up is 1-comp).
+# for tachinnno, the pseudospin factors are multiplied into quantum sim
+# needs hadamard manually added, in magnetization_per_site(), for quantum sim
+
+#CLASSICAL
+#spins3 = ClassicalSpinChain(j=1, j2=0, bg=0, a=1, n=2, open_chain=True, unity=True, choice=False, paper='tachinno')
+#psi0 = init_spin_state(0, spins3.states) - (init_spin_state(2, spins3.states) + init_spin_state(3, spins3.states)) / math.sqrt(2)
+#spins3.all_site_magnetization(300, .01, psi0)
+
+#QUANTUM 2ND ORDER -- No plot 
+#spins9 = QuantumSimSpinChain(j=1, j2=1, bg=0, n=2, choice=False, paper='tachinno')
+#spins9.all_site_magnetization(spins9.second_order_trotter, 30, total_time=305, dt=.01, initialstate=0, hadamard=True)
+
+#QUANTUM 1ST ORDER -- Plotted
+#spins9 = QuantumSimSpinChain(j=1, j2=1, bg=0, n=2, choice=False, paper='tachinno')
+#spins9.all_site_magnetization(spins9.first_order_trotter, 30, total_time=35, dt=.1, initialstate=0, hadamard=True)
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+
+#JOEL FIG 2a  (All Site Magnetization)
+#CLASSICAL WORKS
+#QUANTUM WORKS
+# In joel, the arrows are referring the the normal spin states (up is zero-comp)
+
+#CLASSICAL
+#spins4 = ClassicalSpinChain(j=1, j2=0, bg=0, a=0.5, n=6, open_chain=True, unity=False, choice=False, paper='joel')
+##comp_state = spins4.states - 2 # because spins4.states is all spins in "0" or "up" state, and need the first excited state
+#print(np.binary_repr(comp_state).zfill(spins4.n))
+#psi0 = init_spin_state(comp_state, spins4.states)
+#spins4.all_site_magnetization(80, .1, psi0)
+
+#QUANTUM 1ST ORDER -- no noise model (too noisy - result is unrecognizable)
+#spins10 = QuantumSimSpinChain(j=1, a=1 * 0.5, j2=0, bg=0, n=6, choice=False, open_chain=True, paper='joel')
+#print(spins10.states - 2)
+#print(np.binary_repr(spins10.states - 2).zfill(spins10.n))
+#spins10.all_site_magnetization(spins10.first_order_trotter, 20, total_time=80, dt=.1, initialstate=spins10.states - 2)
+
+#QUANTUM 2ND ORDER -- no noise model (too noisy)
+#spins10 = QuantumSimSpinChain(j=1, a=1 * 0.5, j2=0, bg=0, n=6, choice=False, open_chain=True, paper='joel')
+#print(spins10.states - 2)
+#print(np.binary_repr(spins10.states - 2).zfill(spins10.n))
+#spins10.all_site_magnetization(spins10.second_order_trotter, 20, total_time=80, dt=.1, initialstate=spins10.states - 2)
+
+#CLASSICAL -- wider timescale
+#spins4 = ClassicalSpinChain(j=1, j2=0, bg=0, a=0.5, n=6, open_chain=True, unity=False, choice=False, paper='joel')
+##comp_state = spins4.states - 2 # because spins4.states is all spins in "0" or "up" state, and need the first excited state
+#print(np.binary_repr(comp_state).zfill(spins4.n))
+##psi0 = init_spin_state(comp_state, spins4.states)
+#spins4.all_site_magnetization(300, .1, psi0)
+
+# --------------------------------------------------------------------------------------------------------------------------
+#JOEL FIG 3a  (Occupation Probabilities)
+#CLASSICAL WORKS
+# as in all these, feeding in the computational basis version of the spin state
+# In joel, the arrows are referring the the normal spin states (up is zero-comp)
+# The order is thus both reversed and flipped because the index of each site also counts in from the right side of the ket (classical)
+
+#CLASSICAL
+#spins5 = ClassicalSpinChain(j=1, j2=1, bg=0, a=10, n=6, open_chain=True, unity=False, choice=False, paper='joel')
+#initstate=int('111001', 2)
+##chosenstates = [int(x,2) for x in ['111001','110011','100111','011110']]
+#psi0 = init_spin_state(initstate, spins5.states)
+#spins5.occupation_probabilities(total_time=300, dt=1, initialstate=psi0, chosen_states=chosenstates)
+
+# --------------------------------------------------------------------------------------------------------------------------
+#TACCHINO FIG 5b (Occupation Probabilities)
+#CLASSICAL WORKS
+#QUANTUM 1ST ORDER WORKS
+#QUANTUM 2ND ORDER WORKS
+# In tachinno, the arrows are actually referring to the computational basis states (up is 1-comp).
+
+
+#CLASSICAL
+#spins7 = ClassicalSpinChain(j=1, j2=1, bg=20, a=1, n=3, open_chain=True, unity=True, choice=False, paper='tachinno')
+#initstate = int('100', 2)
+#psi0 = init_spin_state(initstate, spins7.states)
+#chosenstates = [int(x, 2) for x in ['100', '010', '111']]
+#spins7.occupation_probabilities(total_time=300, dt=0.01, initialstate=psi0, chosen_states=chosenstates)
+
+#QUANTUM 1ST ORDER   no noise model (too noisy - result is unrecognizable)
+#spins6 = QuantumSimSpinChain(j=1, bg=20, n=3, a = 1, j2=1, choice=False, open_chain=True, paper='tachinno')
+#initstate = int('100', 2) # works
+#chosenstates = [int(x, 2) for x in ['100', '010', '111']]
+#spins6.occupation_probabilities(spins6.first_order_trotter, 25, total_time=305, dt=.01, initialstate=initstate, chosen_states=chosenstates)
+
+#QUANTUM 2ND ORDER - have not plotted yet (need to find out how to decide 1st or second order by desired accuracy )
+#spins6 = QuantumSimSpinChain(j=1, bg=20, n=3, a = 1, j2=1, choice=False, open_chain=True, paper='tachinno')
+#initstate = int('100', 2) # works
+#chosenstates = [int(x, 2) for x in ['100', '010', '111']]
+#spins6.occupation_probabilities(spins6.first_order_trotter, 25, total_time=35, dt=.1, initialstate=initstate, chosen_states=chosenstates)
+
+# --------------------------------------------------------------------------------------------------------------------------
+#TACCHINO FIG 7 (Two Point Correlations)
+#CLASSICAL WORKS
+#QUANTUM 1ST ORDER WORKS
+#QUANTUM 2ND ORDER WORKS
+# tachinno counts up sites from '1', so site 1 --> site 0
+# tachinno has to have unity = True since the hamiltonian is handled using the pauli operators, but the final result gets scaled out
+# according to the spin operators used in the measurement
+
+#CLASSICAL -- plotted
+#spins14 = ClassicalSpinChain(j = -1, bg=20, a=1, n=3, choice=False, open_chain=True, unity=True, ising=False, paper='tachinno')
+#initstate=init_spin_state(int('000', 2), spins14.states)
+#spins14.two_point_correlations_cl(330, .01, initstate, 'xx', pairs=[(0, 0)]) # auto
+#spins14.two_point_correlations_cl(330, .01, initstate, 'xx', pairs=[(1, 0)]) # nearest
+#spins14.two_point_correlations_cl(330, .01, initstate, 'xx', pairs=[(2, 0)]) # next - nearest
+
+#QUANTUM 1ST ORDER -- plotted
+#spins13 = QuantumSimSpinChain(j=1, bg=20, a=1, n=3, choice=False, open_chain=True, paper='tachinno')
+#initstate = int('000', 2)
+#plot auto, nearest, and next-nearest two-point correlations
+#spins13.two_point_correlations(spins13.first_order_trotter, trotter_steps=10, total_t=330, dt=.01, alpha='x',
+#                               beta='x', chosen_pairs=[(0, 0)], initialstate=initstate)
+#spins13.two_point_correlations(spins13.first_order_trotter, trotter_steps=10, total_t=330, dt=.01, alpha='x',
+##                               beta='x', chosen_pairs=[(1, 0)], initialstate=initstate)
+#spins13.two_point_correlations(spins13.first_order_trotter, trotter_steps=10, total_t=330, dt=.01, alpha='x',
+#                               beta='x', chosen_pairs=[(2, 0)], initialstate=initstate)
+
+
+#QUANTUM 2ND ORDER -- not plotted -- scaling got messed up somewhere in this one
+#spins13 = QuantumSimSpinChain(j=1, bg=20, a=1, n=3, choice=False, open_chain=True, paper='tachinno')
+#initstate = int('111', 2)
+#plot auto, nearest, and next-nearest two-point correlations
+#spins13.two_point_correlations(spins13.second_order_trotter, trotter_steps=10, total_t=330, dt=.01, alpha='x',
+#                                beta='x', chosen_pairs=[(0, 0)], initialstate=initstate)
+#spins13.two_point_correlations(spins13.second_order_trotter, trotter_steps=10, total_t=330, dt=.01, alpha='x',
+#                                beta='x', chosen_pairs=[(1, 0)], initialstate=initstate)
+#spins13.two_point_correlations(spins13.second_order_trotter, trotter_steps=10, total_t=330, dt=.01, alpha='x',
+#                                beta='x', chosen_pairs=[(2, 0)], initialstate=initstate)
+
+
+# --------------------------------------------------------------------------------------------------------------------------
+#TACCHINO FIG 5c (TOTAL MAGNETIZATION)
+#CLASSICAL WORKS
+#QUANTUM 2ND ORDER WORKS
+#QUANTUM 1ST ORDER WORKS
+
+#CLASSICAL -- plotted
+#spins17 = ClassicalSpinChain(j=1, j2=1, a=1, bg=2, n=2, choice=False, open_chain=True, paper='tachinno', ising=True, unity=True, transverse=True)
+#psi0 = init_spin_state(0, spins17.states)
+#spins17.total_magnetization(total_time=65, dt=.1, psi0=psi0)
+
+#QUANTUM 2ND ORDER -- not plotted
+#spins8 = QuantumSimSpinChain(j=1, j2=1, a=1, bg=2, n=2, choice=False, open_chain=True, transverse=True, paper='tachinno', ising=True)
+#spins8.total_magnetization(total_time=65, dt=.1, initialstate=0, trotter_alg=spins8.second_order_trotter, trotter_steps=36)
+
+#QUANTUM 1ST ORDER
+#spins8 = QuantumSimSpinChain(j=1, j2=1, a=1, bg=2, n=2, choice=False, open_chain=True, transverse=True, paper='tachinno', ising=True)
+#spins8.total_magnetization(total_time=650, dt=.01, initialstate=0, trotter_alg=spins8.first_order_trotter, trotter_steps=36)
