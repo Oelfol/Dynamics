@@ -220,18 +220,18 @@ class ClassicalSpinChain:
 
     def __init__(self, j=0.0, j2=0.0, bg=0.0, a=0.0, n=0, open_chain=False, unity=False, choice=False, ising=False, paper='', transverse=False):
 
-        self.j = j  # coupling constant
-        self.j2 = j2  # how much to scale next-nearest coupling
-        self.bg = bg  # magnetic field strength
-        self.a = a  # anisotropy constant jz/j (xxy model, otherwise ignore)
-        self.n = n  # sites
-        self.open_chain = open_chain  # whether open chain
-        self.states = 2 ** n  # number of basis states
-        self.unity = unity  # whether h-bar/2 == 1 (h-bar == 1 elsewise)
-        self.choice = choice  # whether next-nearest, bool
-        self.ising = ising  # for ising model
-        self.paper = paper  # refer to settings for a specific paper
-        self.transverse = transverse  # whether transverse field ising model
+        self.j = j                      # coupling constant
+        self.j2 = j2                    # how much to scale next-nearest coupling
+        self.bg = bg                    # magnetic field strength
+        self.a = a                      # anisotropy constant jz/j (xxy model, otherwise ignore)
+        self.n = n                      # sites
+        self.open_chain = open_chain    # whether open chain
+        self.states = 2 ** n            # number of basis states
+        self.unity = unity              # whether h-bar/2 == 1 (h-bar == 1 elsewise)
+        self.choice = choice            # whether next-nearest, bool
+        self.ising = ising              # for ising model
+        self.paper = paper              # refer to settings for a specific paper
+        self.transverse = transverse    # whether transverse field ising model
 
         self.hamiltonian = sps.lil_matrix(np.zeros([2 ** n, 2 ** n], complex))
         neighbors, nn_neighbors, autos = gen_pairs(self.n, self.choice, False, self.open_chain)
@@ -240,7 +240,7 @@ class ClassicalSpinChain:
         ops = ['x', 'y', 'z']
         if ising:
             ops = ['z']
-            multipliers = [self.a]  # there was also a problem here manifold, ising model was wrong.
+            multipliers = [self.a] 
 
         for y in neighbors:
             for op in ops:
@@ -293,7 +293,7 @@ class ClassicalSpinChain:
         # Plot the results
         fig, ax = plt.subplots()
         for x in pairs_:
-            ax.plot(data.toarray()[pairs_.index(x)][:], label=str(x), linewidth=2) # where is j scaling here?
+            ax.plot(data.toarray()[pairs_.index(x)][:], label=str(x), linewidth=2) 
         plot_dataset_byrows(ax, 'Site Pairs', '<S_i(' + op_order[0] + ')S_j(' + op_order[1] + ')', 'Time')
         plt.title('Equal-Time Correlations')
         plt.show()
