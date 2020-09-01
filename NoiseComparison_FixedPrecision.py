@@ -1,7 +1,7 @@
 # NoiseComparison_FixedPrecision
 
 """
-August '20
+Fall '20
 Code to simulate dynamics of Heisenberg/Ising spin chains
 With fixed precision, comparing ideal qiskit aer simulation to basic device noise model
 """
@@ -212,9 +212,19 @@ def gen_m(leng, steps):
 
 
 def plot_dataset_byrows(ax, legendtitle, ylabel, xlabel):
-    ax.legend(loc='right', title=legendtitle, fontsize='x-large')  # need to make legend optional
+    ax.legend(loc='right', title=legendtitle, fontsize='x-large')
     ax.set_ylabel(ylabel, fontsize='x-large')
     ax.set_xlabel(xlabel, fontsize='x-large')
+
+
+def commutes(a, b):
+    # Test whether operators commute
+    comp = a.dot(b) - b.dot(a)
+    comp = comp.toarray().tolist()
+    if np.count_nonzero(comp) == 0:
+        return True
+    else:
+        return False
 
 
 class ClassicalSpinChain:
@@ -242,19 +252,20 @@ class ClassicalSpinChain:
         ops = ['x', 'y', 'z']
         if ising:
             ops = ['z']
+            multipliers = [self.a]
 
         for y in neighbors:
             for op in ops:
                 dex = ops.index(op)
-                s1 = spin_op(op, y[0], self.n, self.unity)
-                s2 = spin_op(op, y[1], self.n, self.unity)
+                s1 = spin_op(op, y[1], self.n, self.unity)  # switched the 1 and zero here aug 31
+                s2 = spin_op(op, y[0], self.n, self.unity)
                 self.hamiltonian += s1.dot(s2) * self.j * multipliers[dex]
-            for z in nn_neighbors:
-                for op in ops:
-                    dex = ops.index(op)
-                    s1 = spin_op(op, z[0], self.n, self.unity)
-                    s2 = spin_op(op, z[1], self.n, self.unity)
-                    self.hamiltonian += s1.dot(s2) * self.j * multipliers[dex] * self.j2
+        for z in nn_neighbors:
+            for op in ops:
+                dex = ops.index(op)
+                s1 = spin_op(op, z[1], self.n, self.unity)  # switched the one and sero here aug31
+                s2 = spin_op(op, z[0], self.n, self.unity)
+                self.hamiltonian += s1.dot(s2) * self.j * multipliers[dex] * self.j2
         for x in range(self.n):
             if self.bg != 0 and self.transverse == False:
                 s_final = spin_op('z', x, self.n, self.unity) * self.bg / 2
@@ -265,19 +276,46 @@ class ClassicalSpinChain:
 
         self.hamiltonian = sps.csc_matrix(self.hamiltonian)
 
+    def test_commuting_matrices(self):
+        ops = ['x', 'y', 'z']
+        neighbors, nn_neighbors, autos = gen_pairs(self.n, self.choice, False, self.open_chain)
+        multipliers = [1, 1, self.a]
+        if self.ising:
+            ops = ['z']
+            multipliers = [self.a]
+
+        terms = []
+        print('we are here!!')
+        for y in neighbors:
+            for op in ops:
+                dex = ops.index(op)
+                s1 = spin_op(op, y[1], self.n, self.unity)  # changed the 1 and 0 here aug 31
+                s2 = spin_op(op, y[0], self.n, self.unity)
+                terms.append(s1.dot(s2) * self.j * multipliers[dex])
+        for z in nn_neighbors:
+            for op in ops:
+                dex = ops.index(op)
+                s1 = spin_op(op, z[1], self.n, self.unity)
+                s2 = spin_op(op, z[0], self.n, self.unity)
+                terms.append(s1.dot(s2) * self.j * multipliers[dex] * self.j2)
+        for x in range(self.n):
+            if self.bg != 0 and self.transverse == False:
+                s_final = spin_op('z', x, self.n, self.unity) * self.bg / 2
+                terms.append(s_final)
+            elif self.bg != 0 and self.transverse == True:
+                s_final = spin_op('x', x, self.n, self.unity) * self.bg / 2
+                terms.append(s_final)
+
+        commuting = True
+        for i in terms:
+            for j in terms:
+                if not commutes(i, j):
+                    commuting = False
+
+        return commuting
+
 
 # ============================================== Helper functions for Quantum Sim ==================================== >
-
-
-def commutes(a, b):
-    # Test whether the hamiltonian commutes with itself
-
-    comm = a.dot(b) - b.dot(a)
-    comp = comm.toarray().tolist()
-    if max(comp) == 0:
-        return True
-    else:
-        return False
 
 
 def sort_counts(count, qs, shots):
@@ -380,10 +418,9 @@ class QuantumSim:
         if self.paper == 'francis':
             self.unity = True
 
-        self.classical_hamiltonian = ClassicalSpinChain(j=self.j, j2=self.j2,
-                                                        bg=self.bg, a=self.a, n=self.n, open_chain=self.open_chain,
-                                                        unity=self.unity, choice=self.choice).hamiltonian
-        self.h_commutes = commutes(self.classical_hamiltonian, self.classical_hamiltonian)
+        self.h_commutes = ClassicalSpinChain(j=self.j, j2=self.j2, bg=self.bg, a=self.a, n=self.n,
+                                             open_chain=self.open_chain, unity=self.unity,
+                                             choice=self.choice).test_commuting_matrices()
         self.pairs_nn, self.pairs_nnn, autos = gen_pairs(self.n, self.choice, False, self.open_chain)
         self.total_pairs = self.pairs_nn + self.pairs_nnn
 
@@ -399,23 +436,27 @@ class QuantumSim:
                 qc.x(index + anc)
             index += 1
 
+    def xyz_update_num_gates(self):
+        added_gates = 0
+        if not self.ising:
+            added_gates = 17
+        elif self.ising:
+            added_gates = 3
+        return added_gates
+
     def first_order_trotter(self, qc, dt, t, ancilla):
 
         trotter_steps = 1
         if self.h_commutes:
             print("H commutes, trotter_steps = 1")
         else:
-            # unsure how to choose delta with different constants?
             t_ = t
             if t == 0:
                 t_ = 1
-            delta = dt * t_ * self.j
-            # calculate trotter steps based on desired error
+                print("First order trotter in progress..")
+            delta = t_ * dt
             trotter_steps = math.ceil((delta ** 2) / (2 * self.error))
-            print('trotter steps:', trotter_steps, ' t:', t)
-
-        if t == 0:
-            print("First order trotter in progress..")
+            print('trotter steps:', trotter_steps, " t:", t)
 
         # Address needed constants for particular paper
         pseudo_constant_a = 1.0
@@ -424,16 +465,24 @@ class QuantumSim:
             pseudo_constant_a = 4.0
             mag_constant = 2.0
 
+        num_gates = 0
+        # note to self: ibm seems to have an issue with the += operator at the moment
+
         for step in range(trotter_steps):
-            for k in range(self.n):
-                if self.bg != 0.0:
+            for k in range(self.n):  # should this be inside or outside??
+                if self.bg != 0.0:  # can i move this???
                     if self.transverse:
                         qc.rx(self.bg * dt * t / (trotter_steps * mag_constant), k + ancilla)
                     else:
                         qc.rz(self.bg * dt * t / (trotter_steps * mag_constant), k + ancilla)
+                num_gates = num_gates + 1
             for x in self.total_pairs:
                 xyz_operation(qc, x[0], x[1], ancilla, self.j, t, dt, self.j2, trotter_steps * pseudo_constant_a, 1.0,
                               self.ising, self.a)
+                num_gates = num_gates + self.xyz_update_num_gates()
+
+        print('Gates used:', num_gates)
+        print('______________________')
 
     def second_order_trotter(self, qc, dt, t, ancilla):
         trotter_steps = 1
@@ -443,13 +492,14 @@ class QuantumSim:
             t_ = t
             if t == 0:
                 t_ = 1
-            delta = t_ * dt * self.j
+                print("Second order trotter in progress..")
+            delta = t_ * dt
             # calculate trotter steps based on desired error
             trotter_steps = math.ceil(math.sqrt(delta ** 3 / self.error))
             print('trotter steps:', trotter_steps, " t:", t)
 
-        if t == 0:
-            print("Second order trotter in progress..")
+        num_gates = 0
+        # note to self: ibm seems to have an issue with the += operator at the moment
 
         # Address needed constants for particular paper
         pseudo_constant_a = 1.0
@@ -464,19 +514,26 @@ class QuantumSim:
                     qc.rx(self.bg * dt * t / (trotter_steps * mag_constant), k + ancilla)
                 else:
                     qc.rz(self.bg * dt * t / (trotter_steps * mag_constant), k + ancilla)
+                num_gates = num_gates + 1
 
         for step in range(trotter_steps):
             for x in reversed(self.total_pairs[1:]):
                 xyz_operation(qc, x[0], x[1], ancilla, self.j, t, dt, self.j2, trotter_steps * pseudo_constant_a, 2.0,
                               self.ising, self.a)
+                num_gates = num_gates + self.xyz_update_num_gates()
 
             mid = self.total_pairs[0]
             xyz_operation(qc, mid[0], mid[1], ancilla, self.j, t, dt, self.j2, trotter_steps * pseudo_constant_a, 1.0,
                           self.ising, self.a)
+            num_gates = num_gates + self.xyz_update_num_gates()
 
             for x in self.total_pairs[1:]:
                 xyz_operation(qc, x[0], x[1], ancilla, self.j, t, dt, self.j2, trotter_steps * pseudo_constant_a, 2.0,
                               self.ising, self.a)
+                num_gates = num_gates + self.xyz_update_num_gates()
+
+        print('Gates used:', num_gates)
+        print('______________________')
 
     def run_circuit(self, anc, qc, noise):
 
@@ -486,16 +543,16 @@ class QuantumSim:
 
             if not noise:
                 # ideal simulation
-                result = execute(qc, backend=simulator, shots=1024).result()
+                result = execute(qc, backend=simulator, shots=50000).result()
                 counts = [result.get_counts(i) for i in range(len(result.results))]
-                probs = sort_counts(counts[0], anc, 1024)
+                probs = sort_counts(counts[0], anc, 50000)
                 return probs[0] - probs[1]
             else:
                 # noisy simulation
-                result = execute(qc, backend=simulator, shots=1024, noise_model=noise_model,
+                result = execute(qc, backend=simulator, shots=50000, noise_model=noise_model,
                                  basis_gates=basis_gates).result()
                 counts = [result.get_counts(i) for i in range(len(result.results))]
-                probs = sort_counts(counts[0], anc, 1024)
+                probs = sort_counts(counts[0], anc, 50000)
                 return probs[0] - probs[1]
 
         else:
@@ -505,16 +562,16 @@ class QuantumSim:
 
             if not noise:
                 # ideal simulation
-                result = execute(qc, backend=simulator, shots=1024).result()
+                result = execute(qc, backend=simulator, shots=50000).result()
                 counts = [result.get_counts(i) for i in range(len(result.results))]
-                measurements = sort_counts(counts[0], self.n, 1024)
+                measurements = sort_counts(counts[0], self.n, 50000)
                 return measurements
             else:
                 # noisy simulation
-                result = execute(qc, backend=simulator, shots=1024, noise_model=noise_model,
+                result = execute(qc, backend=simulator, shots=50000, noise_model=noise_model,
                                  basis_gates=basis_gates).result()
                 counts = [result.get_counts(i) for i in range(len(result.results))]
-                measurements = sort_counts(counts[0], self.n, 1024)
+                measurements = sort_counts(counts[0], self.n, 50000)
                 return measurements
 
     def magnetization_per_site(self, t, dt, site, initialstate, trotter_alg, hadamard=False):
@@ -764,13 +821,13 @@ def four_site_ibmq(total_time, dt, j):
 
                 qc_id.measure(0, 0)
                 qc_noise.measure(0, 0)
-                result_id = execute(qc_id, backend=simulator, shots=1024).result()
-                result_noise = execute(qc_noise, backend=simulator, shots=1024, noise_model=noise_model,
+                result_id = execute(qc_id, backend=simulator, shots=50000).result()
+                result_noise = execute(qc_noise, backend=simulator, shots=50000, noise_model=noise_model,
                                        basis_gates=basis_gates, optimization_level=0).result()
                 counts_id = [result_id.get_counts(i) for i in range(len(result_id.results))]
                 counts_noise = [result_noise.get_counts(i) for i in range(len(result_noise.results))]
-                sorted_counts_id = sort_counts(counts_id[0], 1, 1024)
-                sorted_counts_noise = sort_counts(counts_noise[0], 1, 1024)
+                sorted_counts_id = sort_counts(counts_id[0], 1, 50000)
+                sorted_counts_noise = sort_counts(counts_noise[0], 1, 50000)
                 measurement_id = sorted_counts_id[0] - sorted_counts_id[1]
                 measurement_noise = sorted_counts_noise[0] - sorted_counts_noise[1]
 
@@ -784,6 +841,7 @@ def four_site_ibmq(total_time, dt, j):
     data_real = [data_real_id, data_real_noise]
     data_imag = [data_imag_id, data_imag_noise]
     two_point_correlations_plotter('x', 'x', j, dt, pairs, data_real, data_imag)
+
 
 # _______________________________________________________________________________________________________________________
 
@@ -822,8 +880,8 @@ def four_site_ibmq(total_time, dt, j):
 
 
 # QUANTUM 1ST ORDER -- no noise model (too noisy - result is unrecognizable)
-# spins10 = QuantumSim(j=1, a=1 * 0.5, j2=0, bg=0, n=6, choice=False, open_chain=True, paper='joel', error=0.05)
-# spins10.all_site_magnetization(spins10.first_order_trotter, total_time=80, dt=.1, initialstate=spins10.states - 2)
+spins10 = QuantumSim(j=1, a=1 * 0.5, j2=0, bg=0, n=6, choice=False, open_chain=True, paper='joel', error=0.15)
+spins10.all_site_magnetization(spins10.first_order_trotter, total_time=80, dt=.1, initialstate=spins10.states - 2)
 
 # QUANTUM 2ND ORDER -- no noise model (too noisy)
 # spins10 = QuantumSim(j=1, a=1 * 0.5, j2=0, bg=0, n=6, choice=False, open_chain=True, paper='joel', error=0.05)
@@ -889,5 +947,6 @@ def four_site_ibmq(total_time, dt, j):
 # spins8.total_magnetization(total_time=65, dt=.1, initialstate=0, trotter_alg=spins8.second_order_trotter)
 
 # QUANTUM 1ST ORDER
-# spins8 = QuantumSim(j=1, j2=1, a=1, bg=2, n=2, choice=False, open_chain=True, transverse=True, paper='tachinno', ising=True, error=0.05)
+# spins8 = QuantumSim(j=1, j2=1, a=1, bg=2, n=2, choice=False, open_chain=True, transverse=True, paper='tachinno',
+#                    ising=True, error=0.05)
 # spins8.total_magnetization(total_time=650, dt=.01, initialstate=0, trotter_alg=spins8.first_order_trotter)
