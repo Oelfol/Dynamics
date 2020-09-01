@@ -1,4 +1,4 @@
-"""
+""" # UPDATE ME IN GITHUB TODAY 
 August '20
 Code to simulate dynamics of Heisenberg/Ising spin chains
 with exact classical solutions and noisy quantum simulations in Qiskit Aer
@@ -28,11 +28,11 @@ from qiskit.providers.aer.noise import NoiseModel
 from qiskit.providers.aer import noise
 
 # ========================================= IBM account and noise model setup ======================================================= >
-
-IBMQ.enable_account("TOKEN HERE")
-
-provider = IBMQ.get_provider(hub='ibm-q', group='open', project='main')
-simulator = Aer.get_backend('qasm_simulator')
+# Note: Due to IBM updates, this method no longer works. See fixed precision / fixed trotter. 
+#IBMQ.enable_account(Token)
+#IBMQ.save_account(Token)
+#provider = IBMQ.get_provider(hub='ibm-q', group='open', project='main')
+#simulator = Aer.get_backend('qasm_simulator')
 
 
 def qc_noise_model(dev_name):
@@ -46,8 +46,8 @@ def qc_noise_model(dev_name):
     coupling_map = device.configuration().coupling_map
     return device, noise_model, basis_gates, coupling_map
 
-dev_name = 'ibmq_16_melbourne'
-device, noise_model, basis_gates, coupling_map = qc_noise_model(dev_name)
+#dev_name = 'ibmq_16_melbourne'
+#device, noise_model, basis_gates, coupling_map = qc_noise_model(dev_name)
 
 
 # ==================================== Plotting Helpers ============================================================================= >
@@ -214,24 +214,24 @@ def init_spin_state(initialpsi, num_states):
     psi_0[initialpsi, 0] = 1
     return sps.csc_matrix(psi_0)
 
-# ========================================== Classical Spin Chains ================================================================== >
+# ========================================== Classical Spin Chains =================================================== >
 
 class ClassicalSpinChain:
 
     def __init__(self, j=0.0, j2=0.0, bg=0.0, a=0.0, n=0, open_chain=False, unity=False, choice=False, ising=False, paper='', transverse=False):
-        # include a choice for autocorrelations
-        self.j = j                                # coupling constant
-        self.j2 = j2                              # how much to scale next-nearest coupling
-        self.bg = bg                              # magnetic field strength
-        self.a = a                                # anisotropy constant jz/j (xxy model, otherwise ignore)
-        self.n = n                                # sites
-        self.open_chain = open_chain              # whether open chain
-        self.states = 2 ** n                      # number of basis states
-        self.unity = unity                        # whether h-bar/2 == 1 (h-bar == 1 elsewise)
-        self.choice = choice                      # whether next-nearest, bool
-        self.ising = ising                        # for ising model
-        self.paper = paper                        # refer to settings for a specific paper
-        self.transverse = transverse              # whether transverse field ising model
+
+        self.j = j  # coupling constant
+        self.j2 = j2  # how much to scale next-nearest coupling
+        self.bg = bg  # magnetic field strength
+        self.a = a  # anisotropy constant jz/j (xxy model, otherwise ignore)
+        self.n = n  # sites
+        self.open_chain = open_chain  # whether open chain
+        self.states = 2 ** n  # number of basis states
+        self.unity = unity  # whether h-bar/2 == 1 (h-bar == 1 elsewise)
+        self.choice = choice  # whether next-nearest, bool
+        self.ising = ising  # for ising model
+        self.paper = paper  # refer to settings for a specific paper
+        self.transverse = transverse  # whether transverse field ising model
 
         self.hamiltonian = sps.lil_matrix(np.zeros([2 ** n, 2 ** n], complex))
         neighbors, nn_neighbors, autos = gen_pairs(self.n, self.choice, False, self.open_chain)
@@ -240,24 +240,25 @@ class ClassicalSpinChain:
         ops = ['x', 'y', 'z']
         if ising:
             ops = ['z']
+            multipliers = [self.a]  # there was also a problem here manifold, ising model was wrong.
 
         for y in neighbors:
             for op in ops:
                 dex = ops.index(op)
-                s1 = spin_op(op, y[0], self.n, self.unity)
-                s2 = spin_op(op, y[1], self.n, self.unity)
+                s1 = spin_op(op, y[1], self.n, self.unity)  # switched the 1 and zero here aug 31
+                s2 = spin_op(op, y[0], self.n, self.unity)
                 self.hamiltonian += s1.dot(s2) * self.j * multipliers[dex]
-            for z in nn_neighbors:
-                for op in ops:
-                    dex = ops.index(op)
-                    s1 = spin_op(op, z[0], self.n, self.unity)
-                    s2 = spin_op(op, z[1], self.n, self.unity)
-                    self.hamiltonian += s1.dot(s2) * self.j * multipliers[dex] * self.j2
+        for z in nn_neighbors:  # WE HAD AN INDENT PROBLEM
+            for op in ops:
+                dex = ops.index(op)
+                s1 = spin_op(op, z[1], self.n, self.unity)  # switched the one and sero here aug31
+                s2 = spin_op(op, z[0], self.n, self.unity)
+                self.hamiltonian += s1.dot(s2) * self.j * multipliers[dex] * self.j2
         for x in range(self.n):
             if self.bg != 0 and self.transverse == False:
                 s_final = spin_op('z', x, self.n, self.unity) * self.bg / 2
                 self.hamiltonian += s_final
-            elif self.bg !=0 and self.transverse == True:
+            elif self.bg != 0 and self.transverse == True:
                 s_final = spin_op('x', x, self.n, self.unity) * self.bg / 2
                 self.hamiltonian += s_final
 
@@ -400,7 +401,7 @@ class ClassicalSpinChain:
 # ============================================== Helper functions for Quantum Sim =============================================== >
 
 
-def commutes(a, b):
+def commutes(a, b): # fix this sometime today
     # Test whether the hamiltonian commutes with itself
 
     comm = a.dot(b) - b.dot(a)
@@ -683,7 +684,7 @@ class QuantumSimSpinChain:
                     elif j == 1:
                         data_imag[chosen_pairs.index(pair), t] += measurement
 
-        equal_time_correlations_plotter(alpha, beta)
+        two_point_correlations_plotter(alpha, beta, abs(self.j), dt, chosen_pairs, data_real, data_imag)
 
 
     def two_point_correlations(self, trotter_alg, trotter_steps, total_t, dt, alpha, beta, chosen_pairs, initialstate=0):
@@ -862,7 +863,7 @@ def four_site_ibmq(total_time, dt, j):
 
 #CLASSICAL
 #spins4 = ClassicalSpinChain(j=1, j2=0, bg=0, a=0.5, n=6, open_chain=True, unity=False, choice=False, paper='joel')
-##comp_state = spins4.states - 2 # because spins4.states is all spins in "0" or "up" state, and need the first excited state
+#comp_state = spins4.states - 2 # because spins4.states is all spins in "0" or "up" state, and need the first excited state
 #print(np.binary_repr(comp_state).zfill(spins4.n))
 #psi0 = init_spin_state(comp_state, spins4.states)
 #spins4.all_site_magnetization(80, .1, psi0)
@@ -879,7 +880,7 @@ def four_site_ibmq(total_time, dt, j):
 #print(np.binary_repr(spins10.states - 2).zfill(spins10.n))
 #spins10.all_site_magnetization(spins10.second_order_trotter, 20, total_time=80, dt=.1, initialstate=spins10.states - 2)
 
-#CLASSICAL -- wider timescale
+#CLASSICAL -- wider timescale # t his is in the wrong place manifold
 #spins4 = ClassicalSpinChain(j=1, j2=0, bg=0, a=0.5, n=6, open_chain=True, unity=False, choice=False, paper='joel')
 ##comp_state = spins4.states - 2 # because spins4.states is all spins in "0" or "up" state, and need the first excited state
 #print(np.binary_repr(comp_state).zfill(spins4.n))
@@ -896,7 +897,7 @@ def four_site_ibmq(total_time, dt, j):
 #CLASSICAL
 #spins5 = ClassicalSpinChain(j=1, j2=1, bg=0, a=10, n=6, open_chain=True, unity=False, choice=False, paper='joel')
 #initstate=int('111001', 2)
-##chosenstates = [int(x,2) for x in ['111001','110011','100111','011110']]
+#chosenstates = [int(x,2) for x in ['111001','110011','100111','011110']]
 #psi0 = init_spin_state(initstate, spins5.states)
 #spins5.occupation_probabilities(total_time=300, dt=1, initialstate=psi0, chosen_states=chosenstates)
 
