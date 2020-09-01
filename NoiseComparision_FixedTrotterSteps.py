@@ -1,7 +1,7 @@
 # NoiseComparison_FixedTrotterSteps
 
 """
-August '20
+Fall '20
 Code to simulate dynamics of Heisenberg/Ising spin chains
 With fixed trotter steps, comparing ideal qiskit aer simulation to basic device noise model
 """
@@ -212,16 +212,25 @@ def gen_m(leng, steps):
 
 
 def plot_dataset_byrows(ax, legendtitle, ylabel, xlabel):
-    ax.legend(loc='right', title=legendtitle, fontsize='x-large')  # need to make legend optional
+    ax.legend(loc='right', title=legendtitle, fontsize='x-large')  
     ax.set_ylabel(ylabel, fontsize='x-large')
     ax.set_xlabel(xlabel, fontsize='x-large')
+
+
+def commutes(a, b):  
+    # Test whether operators commute
+    comp = a.dot(b) - b.dot(a)
+    comp = comp.toarray().tolist()
+    if np.count_nonzero(comp) == 0:
+        return True
+    else:
+        return False
 
 
 class ClassicalSpinChain:
 
     def __init__(self, j=0.0, j2=0.0, bg=0.0, a=0.0, n=0, open_chain=False, unity=False, choice=False, ising=False,
                  paper='', transverse=False):
-
         self.j = j  # coupling constant
         self.j2 = j2  # how much to scale next-nearest coupling
         self.bg = bg  # magnetic field strength
@@ -242,19 +251,20 @@ class ClassicalSpinChain:
         ops = ['x', 'y', 'z']
         if ising:
             ops = ['z']
+            multipliers = [self.a]
 
         for y in neighbors:
             for op in ops:
                 dex = ops.index(op)
-                s1 = spin_op(op, y[0], self.n, self.unity)
-                s2 = spin_op(op, y[1], self.n, self.unity)
+                s1 = spin_op(op, y[1], self.n, self.unity)  # switched the 1 and zero here aug 31
+                s2 = spin_op(op, y[0], self.n, self.unity)
                 self.hamiltonian += s1.dot(s2) * self.j * multipliers[dex]
-            for z in nn_neighbors:
-                for op in ops:
-                    dex = ops.index(op)
-                    s1 = spin_op(op, z[0], self.n, self.unity)
-                    s2 = spin_op(op, z[1], self.n, self.unity)
-                    self.hamiltonian += s1.dot(s2) * self.j * multipliers[dex] * self.j2
+        for z in nn_neighbors:
+            for op in ops:
+                dex = ops.index(op)
+                s1 = spin_op(op, z[1], self.n, self.unity)  # switched the one and zero here aug 31
+                s2 = spin_op(op, z[0], self.n, self.unity)
+                self.hamiltonian += s1.dot(s2) * self.j * multipliers[dex] * self.j2
         for x in range(self.n):
             if self.bg != 0 and self.transverse == False:
                 s_final = spin_op('z', x, self.n, self.unity) * self.bg / 2
@@ -265,19 +275,46 @@ class ClassicalSpinChain:
 
         self.hamiltonian = sps.csc_matrix(self.hamiltonian)
 
+    def test_commuting_matrices(self):
+        ops = ['x', 'y', 'z']
+        neighbors, nn_neighbors, autos = gen_pairs(self.n, self.choice, False, self.open_chain)
+        multipliers = [1, 1, self.a]
+        if self.ising:
+            ops = ['z']
+            multipliers = [self.a]
+
+        terms = []
+
+        for y in neighbors:
+            for op in ops:
+                dex = ops.index(op)
+                s1 = spin_op(op, y[1], self.n, self.unity)  # changed the 1 and 0 here aug 31
+                s2 = spin_op(op, y[0], self.n, self.unity)
+                terms.append(s1.dot(s2) * self.j * multipliers[dex])
+        for z in nn_neighbors:
+            for op in ops:
+                dex = ops.index(op)
+                s1 = spin_op(op, z[1], self.n, self.unity)
+                s2 = spin_op(op, z[0], self.n, self.unity)
+                terms.append(s1.dot(s2) * self.j * multipliers[dex] * self.j2)
+        for x in range(self.n):
+            if self.bg != 0 and self.transverse == False:
+                s_final = spin_op('z', x, self.n, self.unity) * self.bg / 2
+                terms.append(s_final)
+            elif self.bg != 0 and self.transverse == True:
+                s_final = spin_op('x', x, self.n, self.unity) * self.bg / 2
+                terms.append(s_final)
+
+        commuting = True
+        for i in terms:
+            for j in terms:
+                if not commutes(i, j):
+                    commuting = False
+
+        return commuting
+
 
 # ============================================== Helper functions for Quantum Sim ==================================== >
-
-
-def commutes(a, b):
-    # Test whether the hamiltonian commutes with itself
-
-    comm = a.dot(b) - b.dot(a)
-    comp = comm.toarray().tolist()
-    if max(comp) == 0:
-        return True
-    else:
-        return False
 
 
 def sort_counts(count, qs, shots):
@@ -380,10 +417,9 @@ class QuantumSim:
         if self.paper == 'francis':
             self.unity = True
 
-        self.classical_hamiltonian = ClassicalSpinChain(j=self.j, j2=self.j2,
-                                                        bg=self.bg, a=self.a, n=self.n, open_chain=self.open_chain,
-                                                        unity=self.unity, choice=self.choice).hamiltonian
-        self.h_commutes = commutes(self.classical_hamiltonian, self.classical_hamiltonian)
+        self.h_commutes = ClassicalSpinChain(j=self.j, j2=self.j2, bg=self.bg, a=self.a, n=self.n,
+                                             open_chain=self.open_chain, unity=self.unity,
+                                             choice=self.choice).test_commuting_matrices()
         self.pairs_nn, self.pairs_nnn, autos = gen_pairs(self.n, self.choice, False, self.open_chain)
         self.total_pairs = self.pairs_nn + self.pairs_nnn
 
@@ -399,16 +435,25 @@ class QuantumSim:
                 qc.x(index + anc)
             index += 1
 
-    def first_order_trotter(self, qc, dt, t, ancilla):
+    def xyz_update_num_gates(self):
+        added_gates = 0
+        if not self.ising:
+            added_gates = 17
+        elif self.ising:
+            added_gates = 3
+        return added_gates
+
+    def first_order_trotter(self, qc, dt, t, ancilla, count):
 
         trotter_steps = 1
-        if self.h_commutes:
-            print("H commutes, trotter_steps = 1")
-        else:
-            trotter_steps=self.trotter_steps
 
-        if t == 0:
+        if self.h_commutes and count == 0:
             print("First order trotter in progress..")
+            print("H commutes, trotter_steps = 1")
+            print('_______________________')
+
+        if self.h_commutes == False:
+            trotter_steps = self.trotter_steps
 
         # Address needed constants for particular paper
         pseudo_constant_a = 1.0
@@ -417,6 +462,8 @@ class QuantumSim:
             pseudo_constant_a = 4.0
             mag_constant = 2.0
 
+        num_gates = 0
+
         for step in range(trotter_steps):
             for k in range(self.n):
                 if self.bg != 0.0:
@@ -424,19 +471,23 @@ class QuantumSim:
                         qc.rx(self.bg * dt * t / (trotter_steps * mag_constant), k + ancilla)
                     else:
                         qc.rz(self.bg * dt * t / (trotter_steps * mag_constant), k + ancilla)
+                    num_gates = num_gates + 1
             for x in self.total_pairs:
                 xyz_operation(qc, x[0], x[1], ancilla, self.j, t, dt, self.j2, trotter_steps * pseudo_constant_a, 1.0,
                               self.ising, self.a)
+                num_gates = num_gates + self.xyz_update_num_gates()
 
-    def second_order_trotter(self, qc, dt, t, ancilla):
+        if count == 0:
+            print("Gates used for time evolution: ", num_gates)
+
+    def second_order_trotter(self, qc, dt, t, ancilla, count):
         trotter_steps = 1
-        if self.h_commutes:
-            print("H commutes, trotter_steps = 1")
-        else:
-            trotter_steps = self.trotter_steps
-
-        if t == 0:
+        if self.h_commutes and count == 0:
             print("Second order trotter in progress..")
+            print("H commutes, trotter_steps = 1")
+            print('_______________________')
+        if self.h_commutes == False:
+            trotter_steps = self.trotter_steps
 
         # Address needed constants for particular paper
         pseudo_constant_a = 1.0
@@ -445,25 +496,34 @@ class QuantumSim:
             pseudo_constant_a = 4.0
             mag_constant = 2.0
 
+        num_gates = 0
+
         for k in range(self.n):
             if self.bg != 0.0:
                 if self.transverse:
                     qc.rx(self.bg * dt * t / (trotter_steps * mag_constant), k + ancilla)
                 else:
                     qc.rz(self.bg * dt * t / (trotter_steps * mag_constant), k + ancilla)
+                num_gates = num_gates + 1
 
         for step in range(trotter_steps):
             for x in reversed(self.total_pairs[1:]):
                 xyz_operation(qc, x[0], x[1], ancilla, self.j, t, dt, self.j2, trotter_steps * pseudo_constant_a, 2.0,
                               self.ising, self.a)
+                num_gates = num_gates + self.xyz_update_num_gates()
 
             mid = self.total_pairs[0]
             xyz_operation(qc, mid[0], mid[1], ancilla, self.j, t, dt, self.j2, trotter_steps * pseudo_constant_a, 1.0,
                           self.ising, self.a)
+            num_gates = num_gates + self.xyz_update_num_gates()
 
             for x in self.total_pairs[1:]:
                 xyz_operation(qc, x[0], x[1], ancilla, self.j, t, dt, self.j2, trotter_steps * pseudo_constant_a, 2.0,
                               self.ising, self.a)
+                num_gates = num_gates + self.xyz_update_num_gates()
+
+        if count == 0:
+            print("Gates used for time evolution: ", num_gates)
 
     def run_circuit(self, anc, qc, noise):
 
@@ -473,16 +533,16 @@ class QuantumSim:
 
             if not noise:
                 # ideal simulation
-                result = execute(qc, backend=simulator, shots=1024).result()
+                result = execute(qc, backend=simulator, shots=50000).result()
                 counts = [result.get_counts(i) for i in range(len(result.results))]
-                probs = sort_counts(counts[0], anc, 1024)
+                probs = sort_counts(counts[0], anc, 50000)
                 return probs[0] - probs[1]
             else:
                 # noisy simulation
-                result = execute(qc, backend=simulator, shots=1024, noise_model=noise_model,
+                result = execute(qc, backend=simulator, shots=50000, noise_model=noise_model,
                                  basis_gates=basis_gates).result()
                 counts = [result.get_counts(i) for i in range(len(result.results))]
-                probs = sort_counts(counts[0], anc, 1024)
+                probs = sort_counts(counts[0], anc, 50000)
                 return probs[0] - probs[1]
 
         else:
@@ -492,19 +552,19 @@ class QuantumSim:
 
             if not noise:
                 # ideal simulation
-                result = execute(qc, backend=simulator, shots=1024).result()
+                result = execute(qc, backend=simulator, shots=50000).result()
                 counts = [result.get_counts(i) for i in range(len(result.results))]
-                measurements = sort_counts(counts[0], self.n, 1024)
+                measurements = sort_counts(counts[0], self.n, 50000)
                 return measurements
             else:
                 # noisy simulation
-                result = execute(qc, backend=simulator, shots=1024, noise_model=noise_model,
+                result = execute(qc, backend=simulator, shots=50000, noise_model=noise_model,
                                  basis_gates=basis_gates).result()
                 counts = [result.get_counts(i) for i in range(len(result.results))]
-                measurements = sort_counts(counts[0], self.n, 1024)
+                measurements = sort_counts(counts[0], self.n, 50000)
                 return measurements
 
-    def magnetization_per_site(self, t, dt, site, initialstate, trotter_alg, hadamard=False):
+    def magnetization_per_site(self, t, dt, site, initialstate, trotter_alg, counter, hadamard=False):
 
         qc_id = QuantumCircuit(self.n + 1, 1)
         qc_noise = QuantumCircuit(self.n + 1, 1)
@@ -519,8 +579,8 @@ class QuantumSim:
             qc_id.h(2)  # ------------------------------------------------------------------> tachinno fig 5a
             qc_noise.h(2)
 
-        trotter_alg(qc_id, dt, t, 1)
-        trotter_alg(qc_noise, dt, t, 1)
+        trotter_alg(qc_id, dt, t, 1, counter)
+        trotter_alg(qc_noise, dt, t, 1, counter)
 
         choose_control_gate('z', qc_id, 0, site + 1)
         choose_control_gate('z', qc_noise, 0, site + 1)
@@ -543,14 +603,20 @@ class QuantumSim:
 
         data_id = gen_m(self.n, total_time)
         data_noise = gen_m(self.n, total_time)
+        counter, total_circuits = 0, total_time * self.n * 2
 
         for t in range(total_time):
             for site in range(self.n):
-                m_id, m_noise = self.magnetization_per_site(t, dt, site, initialstate, trotter_alg, hadamard=hadamard)
+                print('Progress:', round(counter / total_circuits, 3))
+
+                m_id, m_noise = self.magnetization_per_site(t, dt, site, initialstate, trotter_alg, counter,
+                                                            hadamard=hadamard)
                 data_id[site, t] += m_id
                 data_noise[site, t] += m_noise
 
-        # Plot the results
+                counter += 2
+
+                # Plot the results
         all_site_magnetization_plotter(self.n, abs(self.j), dt, total_time, data_id, data_noise)
 
     def total_magnetization(self, trotter_alg, total_time=0, dt=0.0, initialstate=0):
@@ -558,14 +624,20 @@ class QuantumSim:
 
         data_id = gen_m(1, total_time)
         data_noise = gen_m(1, total_time)
+        counter, total_circuits = 0, total_time * self.n * 2
 
         for t in range(total_time):
             total_magnetization_id = 0
             total_magnetization_noise = 0
             for site in range(self.n):
-                measurement_id, measurement_noise = self.magnetization_per_site(t, dt, site, initialstate, trotter_alg)
+                print('Progress:', round(counter / total_circuits, 3))
+
+                measurement_id, measurement_noise = self.magnetization_per_site(t, dt, site, initialstate, trotter_alg,
+                                                                                counter)
                 total_magnetization_id += measurement_id
                 total_magnetization_noise += measurement_noise
+                counter += 2
+
             data_id[0, t] += total_magnetization_id
             data_noise[0, t] += total_magnetization_noise
 
@@ -577,9 +649,14 @@ class QuantumSim:
         data_real_id, data_imag_id = gen_m(len(chosen_pairs), total_t), gen_m(len(chosen_pairs), total_t)
         data_real_noise, data_imag_noise = gen_m(len(chosen_pairs), total_t), gen_m(len(chosen_pairs), total_t)
 
+        counter, total_circuits = 0, len(chosen_pairs) * total_t * 2 * 2
+
         for pair in chosen_pairs:
             for t in range(total_t):
                 for j in range(2):
+
+                    print('Progress: ', round(counter / total_circuits, 3))
+
                     qc_id = QuantumCircuit(self.n + 1, 1)
                     qc_noise = QuantumCircuit(self.n + 1, 1)
 
@@ -589,8 +666,8 @@ class QuantumSim:
                     qc_id.h(0)
                     qc_noise.h(0)
 
-                    trotter_alg(qc_id, dt, t, 0)
-                    trotter_alg(qc_noise, dt, t, 0)
+                    trotter_alg(qc_id, dt, t, 0, counter)
+                    trotter_alg(qc_noise, dt, t, 0, counter)
 
                     choose_control_gate(beta, qc_id, 0, pair[1] + 1)
                     choose_control_gate(alpha, qc_id, 0, pair[0] + 1)
@@ -609,6 +686,8 @@ class QuantumSim:
                         data_imag_id[chosen_pairs.index(pair), t] += measurement_id
                         data_imag_noise[chosen_pairs.index(pair), t] += measurement_noise
 
+                    counter += 2
+
         data_real = [data_real_id, data_real_noise]
         data_imag = [data_imag_id, data_imag_noise]
 
@@ -622,9 +701,14 @@ class QuantumSim:
         if self.paper in ['joel', 'tachinno']:
             pseudo_constant = 4.0
 
+        counter, total_circuits = 0, len(chosen_pairs) * total_t * 2 * 2
+
         for pair in chosen_pairs:
             for t in range(total_t):
                 for j in range(2):
+
+                    print('Progress:', round(counter / total_circuits, 3))
+
                     qc_id = QuantumCircuit(self.n + 1, 1)
                     qc_noise = QuantumCircuit(self.n + 1, 1)
 
@@ -635,13 +719,13 @@ class QuantumSim:
                     qc_noise.h(0)
 
                     choose_control_gate(beta, qc_id, 0, pair[1] + 1)
-                    trotter_alg(qc_id, dt, t, 1)
+                    trotter_alg(qc_id, dt, t, 1, counter)
                     choose_control_gate(alpha, qc_id, 0, pair[0] + 1)
                     real_or_imag_measurement(qc_id, j)
                     measurement_id = self.run_circuit(1, qc_id, False) / pseudo_constant
 
                     choose_control_gate(beta, qc_noise, 0, pair[1] + 1)
-                    trotter_alg(qc_noise, dt, t, 1)
+                    trotter_alg(qc_noise, dt, t, 1, counter)
                     choose_control_gate(alpha, qc_noise, 0, pair[0] + 1)
                     real_or_imag_measurement(qc_noise, j)
                     measurement_noise = self.run_circuit(1, qc_noise, True) / pseudo_constant
@@ -653,12 +737,12 @@ class QuantumSim:
                         data_imag_id[chosen_pairs.index(pair), t] += measurement_id
                         data_imag_noise[chosen_pairs.index(pair), t] += measurement_noise
 
+                    counter += 2
+
         data_real = [data_real_id, data_real_noise]
         data_imag = [data_imag_id, data_imag_noise]
 
         # Plot the results
-        # Need to alter the plotters
-
         two_point_correlations_plotter(alpha, beta, abs(self.j), dt, chosen_pairs, data_real, data_imag)
 
     def occupation_probabilities(self, trotter_alg, total_time=0, dt=0.0, initialstate=0, chosen_states=[]):
@@ -666,29 +750,34 @@ class QuantumSim:
         data_id = gen_m(len(chosen_states), total_time)
         data_noise = gen_m(len(chosen_states), total_time)
 
+        counter, total_circuits = 0, total_time * 2
+
         for t in range(total_time):
+
+            print('Progress:', round(counter / total_circuits, 3))
+
             qc_id = QuantumCircuit(self.n, self.n)
             qc_noise = QuantumCircuit(self.n, self.n)
 
             self.init_state(qc_id, 0, initialstate)
             self.init_state(qc_noise, 0, initialstate)
 
-            trotter_alg(qc_id, dt, t, 0)
+            trotter_alg(qc_id, dt, t, 0, counter)
             measurements_id = self.run_circuit(0, qc_id, False)
             for x in chosen_states:
                 data_id[chosen_states.index(x), t] = measurements_id[x]
 
-            trotter_alg(qc_noise, dt, t, 0)
+            trotter_alg(qc_noise, dt, t, 0, counter)
             measurements_noise = self.run_circuit(0, qc_noise, True)
             for x in chosen_states:
                 data_noise[chosen_states.index(x), t] = measurements_noise[x]
 
+            counter += 2
+
         data = [data_id, data_noise]
+
         # Plot the results
-        # need to alter the plotters
         occ_plotter(chosen_states, abs(self.j), data, self.n, total_time, dt)
-
-
 
 # ______________________________________________________________________________________________________________________
 
@@ -699,12 +788,12 @@ class QuantumSim:
 
 
 # QUANTUM 2ND ORDER
-#spins9 = QuantumSim(j=1, j2=1, bg=0, n=2, choice=False, paper='tachinno')
-#spins9.all_site_magnetization(spins9.second_order_trotter, total_time=35, dt=.1, initialstate=0, hadamard=True)
+# spins9 = QuantumSim(j=1, j2=1, bg=0, n=2, choice=False, paper='tachinno')
+# spins9.all_site_magnetization(spins9.second_order_trotter, total_time=35, dt=.1, initialstate=0, hadamard=True)
 
 # QUANTUM 1ST ORDER
-#spins9 = QuantumSim(j=1, j2=1, bg=0, n=2, choice=False, paper='tachinno')
-#spins9.all_site_magnetization(spins9.first_order_trotter, total_time=35, dt=.1, initialstate=0, hadamard=True)
+# spins9 = QuantumSim(j=1, j2=1, bg=0, n=2, choice=False, paper='tachinno')
+# spins9.all_site_magnetization(spins9.first_order_trotter, total_time=35, dt=.1, initialstate=0, hadamard=True)
 
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -713,11 +802,11 @@ class QuantumSim:
 # In joel, the arrows are referring the the normal spin states (up is zero-comp)
 
 # QUANTUM 1ST ORDER
-#spins10 = QuantumSim(j=1, a=1 * 0.5, j2=0, bg=0, n=6, choice=False, open_chain=True, paper='joel')
-#spins10.all_site_magnetization(spins10.first_order_trotter, total_time=80, dt=.1, initialstate=spins10.states - 2)
+# spins10 = QuantumSim(j=1, a=1 * 0.5, j2=0, bg=0, n=6, choice=False, open_chain=True, paper='joel', ts=10)
+# spins10.all_site_magnetization(spins10.first_order_trotter, total_time=80, dt=.1, initialstate=spins10.states - 2)
 
 # QUANTUM 2ND ORDER
-# spins10 = QuantumSim(j=1, a=1 * 0.5, j2=0, bg=0, n=6, choice=False, open_chain=True, paper='joel')
+# spins10 = QuantumSim(j=1, a=1 * 0.5, j2=0, bg=0, n=6, choice=False, open_chain=True, paper='joel', ts=10)
 # spins10.all_site_magnetization(spins10.second_order_trotter, total_time=80, dt=.1, initialstate=spins10.states - 2)
 
 
@@ -726,13 +815,13 @@ class QuantumSim:
 # In tachinno, the arrows are actually referring to the computational basis states (up is 1-comp).
 
 # QUANTUM 1ST ORDER
-#spins6 =QuantumSim(j=1, bg=20, n=3, a = 1, j2=1, choice=False, open_chain=True, paper='tachinno')
-#i = int('100', 2)                                 # initial state
-#c = [int(x, 2) for x in ['100', '010', '111']]    # chosen states
-#spins6.occupation_probabilities(spins6.first_order_trotter, total_time=35, dt=.1, initialstate=i, chosen_states=c)
+# spins6 =QuantumSim(j=1, bg=20, n=3, a = 1, j2=1, choice=False, open_chain=True, paper='tachinno', ts=10)
+# i = int('100', 2)                                 # initial state
+# c = [int(x, 2) for x in ['100', '010', '111']]    # chosen states
+# spins6.occupation_probabilities(spins6.first_order_trotter, total_time=35, dt=.1, initialstate=i, chosen_states=c)
 
 # QUANTUM 2ND ORDER
-# spins6 = QuantumSim(j=1, bg=20, n=3, a = 1, j2=1, choice=False, open_chain=True, paper='tachinno')
+# spins6 = QuantumSim(j=1, bg=20, n=3, a = 1, j2=1, choice=False, open_chain=True, paper='tachinno', ts=10)
 # i = int('100', 2) # works
 # c = [int(x, 2) for x in ['100', '010', '111']]
 # spins6.occupation_probabilities(spins6.second_order_trotter, total_time=35, dt=.1, initialstate=i, chosen_states=c)
@@ -746,14 +835,14 @@ class QuantumSim:
 
 
 # QUANTUM 1ST ORDER
-#spins13 = QuantumSim(j=1, bg=20, a=1, n=3, choice=False, open_chain=True, paper='tachinno')
-#initstate = int('000', 2)
+# spins13 = QuantumSim(j=1, bg=20, a=1, n=3, choice=False, open_chain=True, paper='tachinno', ts=10)
+# initstate = int('000', 2)
 # plot auto, nearest, and next-nearest two-point correlations
-#spins13.two_point_correlations(spins13.first_order_trotter, total_t=330, dt=.01, alpha='x',
-#                                beta='x', chosen_pairs=[(0, 0)], initialstate=initstate)
-# spins13.two_point_correlations(spins13.first_order_trotter, total_t=33, dt=.1, alpha='x',
+# spins13.two_point_correlations(spins13.first_order_trotter, total_t=330, dt=.01, alpha='x',
+#                               beta='x', chosen_pairs=[(0, 0)], initialstate=initstate)
+# spins13.two_point_correlations(spins13.first_order_trotter, total_t=330, dt=.01, alpha='x',
 #                               beta='x', chosen_pairs=[(1, 0)], initialstate=initstate)
-# spins13.two_point_correlations(spins13.first_order_trotter, total_t=33, dt=.1, alpha='x',
+# spins13.two_point_correlations(spins13.first_order_trotter, total_t=330, dt=.01, alpha='x',
 #                               beta='x', chosen_pairs=[(2, 0)], initialstate=initstate)
 
 
