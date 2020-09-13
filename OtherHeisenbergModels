@@ -191,16 +191,17 @@ def all_site_magnetization_plotter(n, j, dt, total_t, data, data_gates, data_cl)
     x1 = [i * j * dt for i in range(total_t)]
     one, two, cl, gates = axs[0, 0], axs[1, 0], axs[0, 1], axs[1, 1]
     for site in range(n):
-        one.plot(x1, data_one_id.toarray()[site][:].tolist(), linestyle='-')
-        one.plot(x1, data_one_noise.toarray()[site][:].tolist(), linestyle=":")
-        two.plot(x1, data_two_id.toarray()[site][:].tolist(), linestyle='-')
-        two.plot(x1, data_two_noise.toarray()[site][:].tolist(), linestyle=":")
-        cl.plot(x1, data_cl.toarray()[site][:].tolist())
+        one.plot(x1, data_one_id.toarray()[site][:].tolist(), linestyle='-', label=site)
+        one.plot(x1, data_one_noise.toarray()[site][:].tolist(), linestyle=":", label=site)
+        two.plot(x1, data_two_id.toarray()[site][:].tolist(), linestyle='-', label=site)
+        two.plot(x1, data_two_noise.toarray()[site][:].tolist(), linestyle=":", label=site)
+        cl.plot(x1, data_cl.toarray()[site][:].tolist(), label=site)
 
     gates.plot(x1, data_gates_one.toarray()[0][:].tolist(), label="First-Order", linestyle='-')
     gates.plot(x1, data_gates_two.toarray()[0][:].tolist(), label="Second-Order", linestyle='-')
     gates.set_ylabel("Gates")
 
+    plot_dataset_byrows(gates, 'Formula', "Gates", r'$\it{Jt}$')
     plot_dataset_byrows(one, 'Sites', 'Magnetization', r'$\it{Jt}$')
     plot_dataset_byrows(two, 'Sites', 'Magnetization', r'$\it{Jt}$')
     plot_dataset_byrows(cl, 'Sites', 'Magnetization', r'$\it{Jt}$')
@@ -457,12 +458,14 @@ class ClassicalSpinChain:
         data =  gen_m(1, total_time)
         for t in range(total_time):
             u = sl.expm(self.hamiltonian * dt * t * (-1j))
+            print(u.toarray) 
+            print(psi0.toarray) 
             bra = np.conj(u.dot(psi0).transpose())
             s_z = spin_op('z', site, self.n)
             ket = s_z.dot(u.dot(psi0))
             data[0, t] += (bra.dot(ket).toarray()[0][0]) 
         return data
-
+    
     def all_site_magnetization_c(self, total_time, dt, psi0):
 
         data = gen_m(self.n, total_time)
@@ -512,7 +515,7 @@ def real_or_imag_measurement(qc, j):
     if j == 0:
         qc.h(0)
     elif j == 1:
-        qc.rx(-1 * math.pi / 2, 0)
+        qc.rx(1 * math.pi / 2, 0) # some code has this negative but it should not be TODO
 
 
 def zz_operation(qc, a, b, delta):
@@ -546,10 +549,10 @@ def yy_operation(qc, a, b, delta):
     qc.rx(-1 * math.pi / 2, b)
 
 
-def three_cnot_evolution(qc, a, b, ancilla, j, t, dt, j2, trotter_steps, ising, a_constant):
+def three_cnot_evolution(qc, a, b, ancilla, j, t, dt, j2, trotter_steps, ising, a_constant, boundary):
     # Time evolving the system termwise by the elements in the hamiltonian using S2 gateset # TODO clarify
-    nnn_term = j2
-    if abs(a - b) == 1:
+    nnn_term = j2 
+    if (abs(a - b) == 1 or boundary==1): # TODO fix this in CompareTrotterAlgorithms.py
         nnn_term = 1
 
     a_, b_ = a + ancilla, b + ancilla
@@ -594,6 +597,7 @@ class QuantumSim:
                                              choice=self.choice).test_commuting_matrices()
         self.pairs_nn, self.pairs_nnn, autos = gen_pairs(self.n, self.choice, False, self.open_chain)
         self.total_pairs = self.pairs_nn + self.pairs_nnn
+        print(self.total_pairs)
 
     def init_state(self, qc, ancilla, initial_state):
         # Initialize a circuit in the desired spin state. Add a qubit if there is an ancilla measurement.
@@ -619,7 +623,7 @@ class QuantumSim:
             if t == 0:
                 t_ = 1
                 print("First order trotter in progress..")
-            trotter_steps = math.ceil(self.j * t_ * dt / self.epsilon)
+            trotter_steps = math.ceil(abs(self.j) * t_ * dt / self.epsilon)
             print('trotter steps:', trotter_steps, " t:", t)
 
         for step in range(trotter_steps):
@@ -631,11 +635,18 @@ class QuantumSim:
                         qc.rz(self.bg * dt * t / (trotter_steps), k + ancilla)
                 num_gates = num_gates + 1
             for x in self.total_pairs:
-                three_cnot_evolution(qc, x[0], x[1], ancilla, self.j, t, dt, self.j2, trotter_steps, self.ising, self.a)
+                
+                boundary = 0
+                if x[0] == 0 and x[1] == self.n - 1 and self.open_chain == False: 
+                    boundary += 1 
+               
+                three_cnot_evolution(qc, x[0], x[1], ancilla, self.j, t, dt, self.j2, trotter_steps, 
+                                     self.ising, self.a, boundary)
                 num_gates = num_gates + self.update_gates()
 
         return num_gates
 
+    # need to find whether there is a difference in how first/second order handle periodic boundary 
     def second_order_trotter(self, qc, dt, t, ancilla):
         trotter_steps = 1
         if self.h_commutes:
@@ -645,7 +656,7 @@ class QuantumSim:
             if t == 0:
                 t_ = 1
                 print("Second order trotter in progress..")
-            trotter_steps = math.ceil(self.j * t_ * dt / self.epsilon)
+            trotter_steps = math.ceil(abs(self.j) * t_ * dt / self.epsilon)
             print('trotter steps:', trotter_steps, " t:", t)
 
         num_gates = 0
@@ -661,15 +672,24 @@ class QuantumSim:
                     num_gates = num_gates + 1
 
             for x in reversed(self.total_pairs[1:]):
-                three_cnot_evolution(qc, x[0], x[1], ancilla, self.j, t, dt, self.j2, trotter_steps, self.ising, self.a)
+                boundary = 0
+                if x[0] == 0 and x[1] == self.n - 1 and self.open_chain == False: 
+                    boundary += 1 
+                three_cnot_evolution(qc, x[0], x[1], ancilla, self.j, t, dt, self.j2, trotter_steps, 
+                                     self.ising, self.a, boundary)
                 num_gates = num_gates + self.update_gates()
 
             mid = self.total_pairs[0]
-            three_cnot_evolution(qc, mid[0], mid[1], ancilla, self.j, t, dt, self.j2, trotter_steps, self.ising, self.a)
+            three_cnot_evolution(qc, mid[0], mid[1], ancilla, self.j, t, dt, self.j2, trotter_steps, 
+                                 self.ising, self.a, False)
             num_gates = num_gates + self.update_gates()
 
             for x in self.total_pairs[1:]:
-                three_cnot_evolution(qc, x[0], x[1], ancilla, self.j, t, dt, self.j2, trotter_steps, self.ising, self.a)
+                boundary = 0
+                if x[0] == 0 and x[1] == self.n - 1 and self.open_chain == False: 
+                    boundary += 1 
+                three_cnot_evolution(qc, x[0], x[1], ancilla, self.j, t, dt, self.j2, trotter_steps, 
+                                     self.ising, self.a, boundary)
                 num_gates = num_gates + self.update_gates()
 
         return num_gates
@@ -743,7 +763,7 @@ class QuantumSim:
         data_id = gen_m(self.n, total_time)
         data_noise = gen_m(self.n, total_time)
         data_gates = gen_m(1, total_time)
-
+        
         for t in range(total_time):
             num_gates_total = 0
             for site in range(self.n):
@@ -753,7 +773,7 @@ class QuantumSim:
                 data_noise[site, t] += m_noise
                 num_gates_total += num_gates
             data_gates[0, t] += num_gates_total / self.n
-
+        
         data = [data_id, data_noise]
         return data, data_gates
         # --------- #
@@ -856,7 +876,9 @@ class QuantumSim:
                     measurement_noise = self.run_circuit(1, qc_noise, True) 
 
                     # only need one
+                    
                     num_gates = num_gates_noise
+                    print(num_gates)
                     gates_t += num_gates
 
                     if j == 0:
@@ -911,7 +933,7 @@ class QuantumSim:
 
 class HeisenbergModel():
 
-    def __init__(self, j=0.0, bg=0.0, a=1.0, n=0, j2=1, choice=True, open_chain=True, transverse=False,
+    def __init__(self, j=1.0, bg=0.0, a=1.0, n=0, j2=1, choice=True, open_chain=True, transverse=False,
                  ising=False, epsilon=0):
         # --------- #
         self.classical_chain = ClassicalSpinChain(j=j, j2=j2, bg=bg, a=a, n=n, open_chain=open_chain,
@@ -924,12 +946,15 @@ class HeisenbergModel():
 
     def all_site_magnetization(self, total_t=0, dt=0, initstate=0, hadamard=False):
         # --------- #
-        psi0 = (0, self.classical_chain.states)
+        num_states = self.classical_chain.states
+        psi0 = sps.csc_matrix(np.zeros((num_states, 1)))
+      
         if hadamard:
             spins3 = self.classical_chain.states
-            psi0 = init_spin_state(0, spins3) - (init_spin_state(2, spins3) + init_spin_state(3, spins3)) / math.sqrt(2)
+            psi0 += init_spin_state(0, spins3) - (init_spin_state(2, spins3) + init_spin_state(3, spins3)) / math.sqrt(2)
         else:
-            psio = init_spin_state(initstate, self.classical_chain.states)
+            psi0 += init_spin_state(initstate, num_states)
+        
         data_one, data_gates_one = self.quantum_chain.all_site_magnetization_q(self.first, total_time=total_t, dt=dt,
                                                                                initialstate=initstate,
                                                                                hadamard=hadamard)
@@ -998,7 +1023,23 @@ class HeisenbergModel():
         data = [data_one, data_two]
         occ_plotter(chosen_states, self.classical_chain.j, n, total_t, dt, data_gates, data, data_cl)
         # --------- #
+# TODO fix the cycler 
+# TODO fix labels to not overlap somehow 
+        
+#ex1 - need to find a good epsilon, difficult problem 
+#model = HeisenbergModel(j=1, bg=10, a=10, n=4, choice=False, open_chain=False, ising=False, epsilon=0.01)
+#model.two_point_correlations(total_t=80, dt=.01, initstate=int('000',2), op_order='xx', pairs=[(0, 0), (1, 0), (2, 0)])   
 
+# ex2 - works, but not excellent  
+#model = HeisenbergModel(j=1, bg=1, a=1, n=4, choice=False, open_chain=False, ising=False, epsilon=0.2)
+#model.two_point_correlations(total_t=630, dt=.01, initstate=int('000',2), op_order='xx', pairs=[(0, 0), (1, 0), (2, 0)])   
+
+# ex3 - difference between first and second, may be a bug
+#model = HeisenbergModel(j=1, j2=0, bg=40, a=1, n=4, choice=False, open_chain=False, epsilon=0.09)
+#model.all_site_magnetization(320, .01, int('1010', 2), hadamard=False)
+
+# puut in something to calculate the number of circuits this takes. may be worth the time to 
+# do a code that just looks at second order on the machine. 
 # ==================================== TESTERS ==================================================================== >
 
 # TACHINNO FIG 5a  (All Site Magnetization)
@@ -1010,9 +1051,9 @@ class HeisenbergModel():
 
 # JOEL FIG 2a  (All Site Magnetization)
 
-# model = HeisenbergModel(j=1, bg=0, a=0.5, n=6, j2=0, choice=False, open_chain=True, paper='joel', epsilon=0.4)
-# initstate=model.classical_chain.states - 2
-# model.all_site_magnetization(total_t=800, dt=0.01, initstate=initstate)
+#model = HeisenbergModel(j=1, bg=0, a=0.5, n=6, j2=0, choice=False, open_chain=True, epsilon=0.4)
+#initstate=model.classical_chain.states - 2
+#model.all_site_magnetization(total_t=800, dt=0.01, initstate=initstate)
 
 # ----------------------------------------------------------------------------------------------------------------------
 # TACCHINO FIG 5b (Occupation Probabilities)
