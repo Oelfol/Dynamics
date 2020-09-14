@@ -51,7 +51,8 @@ dev_name = 'ibmq_santiago'  # TODO try different computers
 device, nm, bg, cm = qc_noise_model(dev_name)  # noise model, basis gates, coupling map
 
 # ==================================== Plotting Helpers ============================================================ >
-colors = ['g', 'k', 'maroon', 'mediumblue', 'slateblue', 'limegreen', 'b', 'r', 'olive']
+#colors = ['g', 'k', 'maroon', 'mediumblue', 'slateblue', 'limegreen', 'b', 'r', 'olive']
+colors = ['b', 'r', 'olive']
 custom_cycler = (cycler(color=colors) + cycler(lw=[2] * len(colors)))
 matplotlib.rcParams['figure.figsize'] = [10, 10]
 plt.rc('font', size=12)
@@ -549,7 +550,7 @@ def yy_operation(qc, a, b, delta):
     qc.rx(-1 * math.pi / 2, b)
 
 
-def three_cnot_evolution(qc, a, b, ancilla, j, t, dt, j2, trotter_steps, ising, a_constant, boundary):
+def three_cnot_evolution(qc, a, b, ancilla, j, t, dt, j2, trotter_steps, c, ising, a_constant, boundary):
     # Time evolving the system termwise by the elements in the hamiltonian using S2 gateset # TODO clarify
     nnn_term = j2 
     if (abs(a - b) == 1 or boundary==1): # TODO fix this in CompareTrotterAlgorithms.py
@@ -557,12 +558,12 @@ def three_cnot_evolution(qc, a, b, ancilla, j, t, dt, j2, trotter_steps, ising, 
 
     a_, b_ = a + ancilla, b + ancilla
     if ising:
-        zz_operation(qc, a_, b_, j * a_constant * t * dt * nnn_term / (trotter_steps))
+        zz_operation(qc, a_, b_, j * a_constant * t * dt * nnn_term / (c * trotter_steps))
 
     else:
-        delta = j * t * dt * nnn_term / (trotter_steps)
+        delta = j * t * dt * nnn_term / (c * trotter_steps)
         qc.cx(a_, b_)
-        qc.rx(2 * delta * a_constant - math.pi / 2, a_)
+        qc.rx(2 * delta - math.pi / 2, a_) # changed alpha here 
         qc.rz(2 * delta * a_constant, b_)
         qc.h(a_)
         qc.cx(a_, b_)
@@ -641,12 +642,12 @@ class QuantumSim:
                     boundary += 1 
                
                 three_cnot_evolution(qc, x[0], x[1], ancilla, self.j, t, dt, self.j2, trotter_steps, 
-                                     self.ising, self.a, boundary)
+                                     1.0, self.ising, self.a, boundary)
                 num_gates = num_gates + self.update_gates()
 
         return num_gates
 
-    # need to find whether there is a difference in how first/second order handle periodic boundary 
+    
     def second_order_trotter(self, qc, dt, t, ancilla):
         trotter_steps = 1
         if self.h_commutes:
@@ -676,12 +677,12 @@ class QuantumSim:
                 if x[0] == 0 and x[1] == self.n - 1 and self.open_chain == False: 
                     boundary += 1 
                 three_cnot_evolution(qc, x[0], x[1], ancilla, self.j, t, dt, self.j2, trotter_steps, 
-                                     self.ising, self.a, boundary)
+                                     2.0, self.ising, self.a, boundary)
                 num_gates = num_gates + self.update_gates()
-
+            # TODO MAKE SURE THE 2.0 IS IN OTHER CODE
             mid = self.total_pairs[0]
             three_cnot_evolution(qc, mid[0], mid[1], ancilla, self.j, t, dt, self.j2, trotter_steps, 
-                                 self.ising, self.a, False)
+                                 1.0, self.ising, self.a, False)
             num_gates = num_gates + self.update_gates()
 
             for x in self.total_pairs[1:]:
@@ -689,7 +690,7 @@ class QuantumSim:
                 if x[0] == 0 and x[1] == self.n - 1 and self.open_chain == False: 
                     boundary += 1 
                 three_cnot_evolution(qc, x[0], x[1], ancilla, self.j, t, dt, self.j2, trotter_steps, 
-                                     self.ising, self.a, boundary)
+                                     2.0, self.ising, self.a, boundary)
                 num_gates = num_gates + self.update_gates()
 
         return num_gates
@@ -1023,23 +1024,22 @@ class HeisenbergModel():
         data = [data_one, data_two]
         occ_plotter(chosen_states, self.classical_chain.j, n, total_t, dt, data_gates, data, data_cl)
         # --------- #
-# TODO fix the cycler 
-# TODO fix labels to not overlap somehow 
-        
-#ex1 - need to find a good epsilon, difficult problem 
-#model = HeisenbergModel(j=1, bg=10, a=10, n=4, choice=False, open_chain=False, ising=False, epsilon=0.01)
-#model.two_point_correlations(total_t=80, dt=.01, initstate=int('000',2), op_order='xx', pairs=[(0, 0), (1, 0), (2, 0)])   
 
-# ex2 - works, but not excellent  
+# TODO fix labels to not overlap somehow 
+# TODO fix color cycler
+       
+#ex1 - works 
+#model = HeisenbergModel(j=1, bg=10, a=10, n=4, choice=False, open_chain=False, ising=False, epsilon=0.05)
+#model.two_point_correlations(total_t=160, dt=.01, initstate=int('000',2), op_order='xx', pairs=[(0, 0), (1, 0), (2, 0)])   
+
+# ex2 - works, but need different epsilon
 #model = HeisenbergModel(j=1, bg=1, a=1, n=4, choice=False, open_chain=False, ising=False, epsilon=0.2)
 #model.two_point_correlations(total_t=630, dt=.01, initstate=int('000',2), op_order='xx', pairs=[(0, 0), (1, 0), (2, 0)])   
 
-# ex3 - difference between first and second, may be a bug
-#model = HeisenbergModel(j=1, j2=0, bg=40, a=1, n=4, choice=False, open_chain=False, epsilon=0.09)
-#model.all_site_magnetization(320, .01, int('1010', 2), hadamard=False)
+# ex3 - works
+model = HeisenbergModel(j=1, j2=0, bg=40, a=1, n=4, choice=False, open_chain=False, epsilon=0.09)
+model.all_site_magnetization(320, .01, int('1010', 2), hadamard=False)
 
-# puut in something to calculate the number of circuits this takes. may be worth the time to 
-# do a code that just looks at second order on the machine. 
 # ==================================== TESTERS ==================================================================== >
 
 # TACHINNO FIG 5a  (All Site Magnetization)
