@@ -47,12 +47,13 @@ def qc_noise_model(dev_name):
     return device, noise_model, basis_gates, coupling_map
 
 
-dev_name = 'ibmq_santiago'  # TODO try different computers
+dev_name = 'ibmq_santiago'  
 device, nm, bg, cm = qc_noise_model(dev_name)  # noise model, basis gates, coupling map
 
 # ==================================== Plotting Helpers ============================================================ >
 #colors = ['g', 'k', 'maroon', 'mediumblue', 'slateblue', 'limegreen', 'b', 'r', 'olive']
 colors = ['b', 'r', 'olive']
+
 custom_cycler = (cycler(color=colors) + cycler(lw=[2] * len(colors)))
 matplotlib.rcParams['figure.figsize'] = [10, 10]
 plt.rc('font', size=12)
@@ -111,13 +112,15 @@ def two_point_correlations_plotter(alpha, beta, j, dt, pairs, data_one, data_two
     # todo out alpha, beta
     real_one, imag_one, gates_one = data_one[0], data_one[1], data_one[2]
     real_two, imag_two, gates_two = data_two[0], data_two[1], data_two[2]
-    real_one_id, imag_one_id = real_one[0], imag_one[0]  # make sure the order is right here TODO
+    real_one_id, imag_one_id = real_one[0], imag_one[0] 
     real_one_noise, imag_one_noise = real_one[1], imag_one[1]
     real_two_id, imag_two_id = real_two[0], imag_two[0]
     real_two_noise, imag_two_noise = real_two[1], imag_two[1]
     real_cl_data, im_cl_data = data_cl[0], data_cl[1]
     re_label = r'$Re \langle S_{\alpha}^{i}(t)S_{\beta}^{j}(0)\rangle $'
     im_label = r'$Im \langle S_{\alpha}^{i}(t)S_{\beta}^{j}(0)\rangle $'
+    
+    colors = ['g', 'k', 'maroon', 'mediumblue', 'slateblue', 'limegreen', 'b', 'r', 'olive']
 
     fig, axs = set_up_axes(4, 2)
     real1, im1, real2, im2, gate1, gate2 = axs[0, 0], axs[1, 0], axs[2, 0], axs[3, 0], axs[2, 1], axs[3, 1]
@@ -125,18 +128,20 @@ def two_point_correlations_plotter(alpha, beta, j, dt, pairs, data_one, data_two
 
     scaler = abs(j) * dt
     p = [i * scaler for i in range(len(real_one_id.toarray()[0][:].tolist()))]
+    pairsdex=0
     for x in pairs:
         dx = pairs.index(x)
-        real1.plot(p, real_one_id.toarray()[dx][:].tolist(), label=str(x))
-        real1.plot(p, real_one_noise.toarray()[dx][:].tolist(), label=str(x), linestyle=":")
-        real2.plot(p, real_two_id.toarray()[dx][:].tolist(), label=str(x))
-        real2.plot(p, real_two_noise.toarray()[dx][:].tolist(), label=str(x), linestyle=":")
-        real_cl.plot(p, real_cl_data.toarray()[dx][:].tolist(), label=str(x))
-        im_cl.plot(p, im_cl_data.toarray()[dx][:].tolist(), label=str(x))
-        im1.plot(p, imag_one_id.toarray()[dx][:].tolist(), label=str(x))
-        im1.plot(p, imag_one_noise.toarray()[dx][:].tolist(), label=str(x), linestyle=":")
-        im2.plot(p, imag_two_id.toarray()[dx][:].tolist(), label=str(x))
-        im2.plot(p, imag_two_noise.toarray()[dx][:].tolist(), label=str(x), linestyle=":")
+        real1.plot(p, real_one_id.toarray()[dx][:].tolist(), label=str(x), color=colors[pairsdex])
+        real1.plot(p, real_one_noise.toarray()[dx][:].tolist(), label=str(x), linestyle=":", color=colors[pairsdex])
+        real2.plot(p, real_two_id.toarray()[dx][:].tolist(), label=str(x), color=colors[pairsdex])
+        real2.plot(p, real_two_noise.toarray()[dx][:].tolist(), label=str(x), linestyle=":", color=colors[pairsdex])
+        real_cl.plot(p, real_cl_data.toarray()[dx][:].tolist(), label=str(x), color=colors[pairsdex])
+        im_cl.plot(p, im_cl_data.toarray()[dx][:].tolist(), label=str(x), color=colors[pairsdex])
+        im1.plot(p, imag_one_id.toarray()[dx][:].tolist(), label=str(x), color=colors[pairsdex])
+        im1.plot(p, imag_one_noise.toarray()[dx][:].tolist(), label=str(x), linestyle=":", color=colors[pairsdex])
+        im2.plot(p, imag_two_id.toarray()[dx][:].tolist(), label=str(x), color=colors[pairsdex])
+        im2.plot(p, imag_two_noise.toarray()[dx][:].tolist(), label=str(x), linestyle=":", color=colors[pairsdex])
+        pairsdex += 1 
     gate1.plot(p, gates_one.toarray()[0, :].tolist())
     gate2.plot(p, gates_two.toarray()[0, :].tolist())
     gate1.set_ylabel("Gates (First)", fontsize="small")
@@ -850,7 +855,7 @@ class QuantumSim:
         data_real_id, data_imag_id = gen_m(len(chosen_pairs), total_t), gen_m(len(chosen_pairs), total_t)
         data_real_noise, data_imag_noise = gen_m(len(chosen_pairs), total_t), gen_m(len(chosen_pairs), total_t)
         data_gates = gen_m(1, total_t)
-
+        
         for pair in chosen_pairs:
             for t in range(total_t):
                 gates_t = 0
@@ -891,7 +896,7 @@ class QuantumSim:
 
                 if chosen_pairs.index(pair) == 0:
                     data_gates[0, t] += gates_t / 2
-
+        
         data_real = [data_real_id, data_real_noise]
         data_imag = [data_imag_id, data_imag_noise]
         return data_real, data_imag, data_gates
@@ -1029,16 +1034,16 @@ class HeisenbergModel():
 # TODO fix color cycler
        
 #ex1 - works 
-#model = HeisenbergModel(j=1, bg=10, a=10, n=4, choice=False, open_chain=False, ising=False, epsilon=0.05)
-#model.two_point_correlations(total_t=160, dt=.01, initstate=int('000',2), op_order='xx', pairs=[(0, 0), (1, 0), (2, 0)])   
+model = HeisenbergModel(j=1, bg=10, a=10, n=4, choice=False, open_chain=False, ising=False, epsilon=0.05)
+model.two_point_correlations(total_t=160, dt=.01, initstate=int('000',2), op_order='xx', pairs=[(0, 0), (1, 0), (2, 0)])   
 
 # ex2 - works, but need different epsilon
-#model = HeisenbergModel(j=1, bg=1, a=1, n=4, choice=False, open_chain=False, ising=False, epsilon=0.2)
+#model = HeisenbergModel(j=1, bg=1, a=1, n=4, choice=False, open_chain=False, ising=False, epsilon=0.1)
 #model.two_point_correlations(total_t=630, dt=.01, initstate=int('000',2), op_order='xx', pairs=[(0, 0), (1, 0), (2, 0)])   
 
 # ex3 - works
-model = HeisenbergModel(j=1, j2=0, bg=40, a=1, n=4, choice=False, open_chain=False, epsilon=0.09)
-model.all_site_magnetization(320, .01, int('1010', 2), hadamard=False)
+#model = HeisenbergModel(j=1, j2=0, bg=40, a=1, n=4, choice=False, open_chain=False, epsilon=0.09)
+#model.all_site_magnetization(320, .01, int('1010', 2), hadamard=False)
 
 # ==================================== TESTERS ==================================================================== >
 
