@@ -180,16 +180,19 @@ def all_site_magnetization_plotter(n, j, dt, total_t, data, data_gates, data_cl)
     data_one, data_two = data[0], data[1]
     data_one_id, data_one_noise = data_one[0], data_one[1]
     data_two_id, data_two_noise = data_two[0], data_two[1]
-
+    colors_ = ['g', 'k', 'maroon', 'mediumblue', 'slateblue', 'limegreen', 'b', 'r', 'olive']
+    
     fig, axs = set_up_axes(2, 2)
     x1 = [i * abs(j) * dt for i in range(total_t)]
     one, two, cl, gates = axs[0, 0], axs[1, 0], axs[0, 1], axs[1, 1]
+    sitedex = 0 
     for site in range(n):
         one.plot(x1, data_one_id.toarray()[site][:].tolist(), linestyle='-', label=site)
         one.plot(x1, data_one_noise.toarray()[site][:].tolist(), linestyle=":", label=site)
         two.plot(x1, data_two_id.toarray()[site][:].tolist(), linestyle='-', label=site)
         two.plot(x1, data_two_noise.toarray()[site][:].tolist(), linestyle=":", label=site)
-        cl.plot(x1, data_cl.toarray()[site][:].tolist(), label=site)
+        cl.plot(x1, data_cl.toarray()[site][:].tolist(), label=site, color = colors_[sitedex])
+        sitedex += 1 
 
     gates.plot(x1, data_gates_one.toarray()[0][:].tolist(), label="First-Order", linestyle='-')
     gates.plot(x1, data_gates_two.toarray()[0][:].tolist(), label="Second-Order", linestyle='-')
@@ -559,7 +562,7 @@ def three_cnot_evolution(qc, a, b, ancilla, j, t, dt, j2, trotter_steps, c, isin
 
     a_, b_ = a + ancilla, b + ancilla
     if ising:
-        zz_operation(qc, a_, b_, j * t * dt * nnn_term / (c * trotter_steps)) # should be no a_constant here
+        zz_operation(qc, a_, b_, j * t * dt * nnn_term / (c * trotter_steps))
 
     else:
         delta = j * t * dt * nnn_term / (c * trotter_steps)
@@ -1054,9 +1057,9 @@ class HeisenbergModel():
 
 # JOEL FIG 2a  (All Site Magnetization)
 
-model = HeisenbergModel(j=1, bg=0, a=0.5, n=6, j2=0, choice=False, open_chain=True, paper='joel', epsilon=0.1) 
-initstate=model.classical_chain.states - 2 
-model.all_site_magnetization(total_t=800, dt=0.01, initstate=initstate)
+#model = HeisenbergModel(j=1, bg=0, a=0.5, n=6, j2=0, choice=False, open_chain=True, paper='joel', epsilon=0.2) 
+#initstate=model.classical_chain.states - 2 
+#model.all_site_magnetization(total_t=800, dt=0.01, initstate=initstate)
 
 # ----------------------------------------------------------------------------------------------------------------------
 # TACCHINO FIG 5b (Occupation Probabilities)
@@ -1087,5 +1090,5 @@ model.all_site_magnetization(total_t=800, dt=0.01, initstate=initstate)
 
 # ----------------------------------------------------------------------------------------------------------------------
 
-#model = HeisenbergModel(j=-.84746, j2=1, bg=0, a=1, n=4, open_chain=False, unity=True, choice=False, paper='francis', epsilon=0.2)
+#model = HeisenbergModel(j=-.84746, j2=1, bg=0, a=1, n=4, open_chain=False, unity=True, choice=False, paper='francis', epsilon=0.1)
 #model.two_point_correlations(op_order='xx', total_t=600, dt=.01, pairs=[(1, 1), (2, 1), (3, 1)], initstate=0)
