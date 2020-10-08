@@ -240,9 +240,10 @@ def spin_op(operator, site, n, unity):
 
     if unity:
         pauli_ops = [sx, sy, sz, 2 * plus, 2 * minus]
+
     if site == (n - 1):
         array = pauli_ops[ops_list.index(operator)]
-    for x in reversed(range(0, n - 1)):
+    for x in reversed(range(0, n - 1)): 
         if x == site:
             array = sps.kron(array, pauli_ops[ops_list.index(operator)])
         else:
@@ -328,13 +329,13 @@ class ClassicalSpinChain:
 
         for y in neighbors:
             for op in ops:
-                dex = ops.index(op)
-                s1, s2 = spin_op(op, y[1], self.n, self.unity), spin_op(op, y[0], self.n, self.unity)
+                dex = ops.index(op) 
+                s1, s2 = spin_op(op, y[0], self.n, self.unity), spin_op(op, y[1], self.n, self.unity)
                 self.hamiltonian += s1.dot(s2) * self.j * multipliers[dex]
         for z in nn_neighbors:
             for op in ops:
                 dex = ops.index(op)
-                s1, s2 = spin_op(op, z[1], self.n, self.unity), spin_op(op, z[0], self.n, self.unity)
+                s1, s2 = spin_op(op, z[0], self.n, self.unity), spin_op(op, z[1], self.n, self.unity)
                 self.hamiltonian += s1.dot(s2) * self.j * multipliers[dex] * self.j2
         for x in range(self.n):
             if self.bg != 0 and self.transverse == False:
@@ -400,7 +401,7 @@ class ClassicalSpinChain:
 
         for t in range(total_time):
             if self.unity:
-                t = t / 2
+                t = t / 2 # why is this still here? need to do equal time correlations 
             u = sl.expm(self.hamiltonian * dt * t * (-1j))
             bra = np.conj(u.dot(psi0).T)
             for pair in pairs_:
@@ -424,13 +425,13 @@ class ClassicalSpinChain:
             pseudo_constant = 4
 
         for t in range(total_time):
-            t_ = t #self.j * t # why was this multiplied by j ??? 
-            u = sl.expm(self.hamiltonian * dt * t_ * (-1j))
-            u_dag = sl.expm(self.hamiltonian * dt * t_ * (1j))
+            t_ = t 
+            u = sl.expm(self.hamiltonian * dt * t_ * (1j))
+            u_dag = sl.expm(self.hamiltonian * dt * t_ * (-1j))
             psi_dag = np.conj(psi0).transpose()
             for x in range(len(pairs)):
-                si = spin_op(op_order[1], pairs[x][0], self.n, self.unity)
-                sj = spin_op(op_order[0], pairs[x][1], self.n, self.unity)
+                si = spin_op(op_order[0], pairs[x][0], self.n, self.unity)
+                sj = spin_op(op_order[1], pairs[x][1], self.n, self.unity)
                 ket = u_dag.dot(si.dot(u.dot(sj.dot(psi0))))
                 res = psi_dag.dot(ket).toarray()[0][0]
                 dyn_data_real[x, t] = np.real(res) / pseudo_constant
@@ -520,7 +521,7 @@ def real_or_imag_measurement(qc, j):
     if j == 0:
         qc.h(0)
     elif j == 1:
-        qc.rx(1 * math.pi / 2, 0)
+        qc.rx(-1 * math.pi / 2, 0) 
 
 
 def zz_operation(qc, a, b, delta):
@@ -583,7 +584,7 @@ def three_cnot_evolution(qc, a, b, ancilla, j, t, dt, j2, trotter_steps, c, isin
 
 class QuantumSim:
 
-    def __init__(self, j=0.0, bg=0.0, a=1.0, n=0, j2=1, choice=True, open_chain=True, transverse=False, paper='',
+    def __init__(self, j=0.0, bg=0.0, a=1.0, n=0, j2=1, choice=False, open_chain=True, transverse=False, paper='',
                  ising=False, epsilon=0):
 
         self.j = j  # ================================================= # coupling constant
@@ -791,7 +792,7 @@ class QuantumSim:
         data_id = gen_m(self.n, total_time)
         data_noise = gen_m(self.n, total_time)
         data_gates = gen_m(1, total_time)
-
+        
         for t in range(total_time):
             num_gates_total = 0
             for site in range(self.n):
@@ -801,7 +802,7 @@ class QuantumSim:
                 data_noise[site, t] += m_noise
                 num_gates_total += num_gates
             data_gates[0, t] += num_gates_total / self.n
-  
+    
         data = [data_id, data_noise]
         return data, data_gates
         # --------- #
@@ -877,7 +878,7 @@ class QuantumSim:
         data_real_id, data_imag_id = gen_m(len(chosen_pairs), total_t), gen_m(len(chosen_pairs), total_t)
         data_real_noise, data_imag_noise = gen_m(len(chosen_pairs), total_t), gen_m(len(chosen_pairs), total_t)
         data_gates = gen_m(1, total_t)
-
+        
         # Address needed constants for particular paper
         pseudo_constant = 1.0
         if self.paper in ['joel', 'tachinno']:
@@ -921,7 +922,7 @@ class QuantumSim:
 
                 if chosen_pairs.index(pair) == 0:
                     data_gates[0, t] += gates_t / 2
-
+        
         data_real = [data_real_id, data_real_noise]
         data_imag = [data_imag_id, data_imag_noise]
         return data_real, data_imag, data_gates
@@ -932,7 +933,7 @@ class QuantumSim:
         data_id = gen_m(len(chosen_states), total_time)
         data_noise = gen_m(len(chosen_states), total_time)
         data_gates = gen_m(1, total_time)
-
+    
         for t in range(total_time):
             qc_id = QuantumCircuit(self.n, self.n)
             qc_noise = QuantumCircuit(self.n, self.n)
@@ -953,7 +954,7 @@ class QuantumSim:
             # only need one
             num_gates = num_gates_noise
             data_gates[0, t] = num_gates
-
+        
         data = [data_id, data_noise]
         return data, data_gates
         # --------- #
@@ -1064,26 +1065,23 @@ class HeisenbergModel():
 # ----------------------------------------------------------------------------------------------------------------------
 # TACCHINO FIG 5b (Occupation Probabilities)
 
-#model = HeisenbergModel(j=1, bg=20, a=1, n=3, j2=1, choice=False, open_chain=True, transverse=False, paper='tachinno',
-#                 ising=False, epsilon=0.2, unity=True) 
+#model = HeisenbergModel(j=1, bg=20, a=1, n=3, j2=1, choice=False, open_chain=True, transverse=False, paper='tachinno',#
+#                    ising=False, epsilon=0.2, unity=True) 
 #c = [int(x, 2) for x in ['100', '010', '111']]
 #model.occupation_probabilities(total_t=350, dt=0.01, initstate=int('100', 2), chosen_states=c)
 
 
 # --------------------------------------------------------------------------------------------------------------------------
 # TACCHINO FIG 7 (Two Point Correlations)
-
-#model = HeisenbergModel(j=1, bg=20, a=1, n=3, j2=1, choice=False, open_chain=True, transverse=False, paper='tachinno',
+#model = HeisenbergModel(j=-1, bg=20, a=1, n=3, j2=1, choice=False, open_chain=True, transverse=False, paper='tachinno',
 #                 ising=False, epsilon=0.2, unity=True) 
-# auto, nearest, next-nearest two-point correlations 
-#model.two_point_correlations(op_order='xx', total_t=330, dt=.01, pairs=[(1,0)], initstate=int('000', 2))
 #model.two_point_correlations(op_order='xx', total_t=330, dt=.01, pairs=[(0,0)], initstate=int('000', 2))
+#model.two_point_correlations(op_order='xx', total_t=330, dt=.01, pairs=[(1,0)], initstate=int('000', 2))
 #model.two_point_correlations(op_order='xx', total_t=330, dt=.01, pairs=[(2,0)], initstate=int('000', 2))
 
 
 # ----------------------------------------------------------------------------------------------------------------------
 # TACCHINO FIG 5c (TOTAL MAGNETIZATION)
-
 #model = HeisenbergModel(j=1, bg=2, a=1, n=2, j2=1, choice=False, open_chain=True, transverse=True, paper='tachinno',
 #                 ising=True, epsilon=0.2, unity=True)
 #model.total_magnetization(total_t=650, dt=0.01, initstate=0)
