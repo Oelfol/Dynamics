@@ -1,5 +1,6 @@
 
 # Code to implement IBU method for readout error mitigation, using PyUnfold
+# Combines pyunfold with own attempted code, for better general agreement. 
 # source: https://github.com/jrbourbeau/pyunfold , https://www.theoj.org/joss-papers/joss.00741/10.21105.joss.00741.pdf
 # File storage format : Each row of csv file corresponds to all P(obtain J| true I), and num_shots is part of filename
 # October 2020
@@ -154,6 +155,7 @@ def unfold(filename, shots, measured, num_qubits):
 
     temp = unfolded_results['unfolded'] / shots
 
+    # Separate method, combined as average :: 
     r_matrix2 = sch.read_numpy_array(filename)
 
     num_states = 2 ** num_qubits
