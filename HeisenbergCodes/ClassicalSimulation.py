@@ -59,7 +59,7 @@ class ClassicalSpinChain:
         for y in neighbors:
             for op in ops:
                 dex = ops.index(op)
-                s1, s2 = hf.spin_op(op, y[0], self.n, self.unity), hf.spin_op(op, y[1], self.n, self.unity)  # TODO these were not agreeing with commuting part. figure it out
+                s1, s2 = hf.spin_op(op, y[0], self.n, self.unity), hf.spin_op(op, y[1], self.n, self.unity) 
                 self.hamiltonian += s1.dot(s2) * self.j * multipliers[dex]
                 if dex_terms % 2 == 0:
                     self.even_terms += s1.dot(s2) * self.j * multipliers[dex]
