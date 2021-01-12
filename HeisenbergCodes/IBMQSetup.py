@@ -27,8 +27,7 @@ import numpy as np
 # Sometimes, this command is not necessary (if console says no account in session).
 # IBMQ.disable_account()
 
-TOKEN = '29e5a75de595227f8e2477aa7abab6595dfafbc3375d7b510fa8be7c03b95c031e49887' \
-        'af3da2d18efb30719038730cdf0ee806523bfdfbc4c231f0ad93f7e74'
+#TOKEN = 
 provider = IBMQ.enable_account(TOKEN, hub='ibm-q', group='open', project='main')
 simulator = Aer.get_backend('qasm_simulator')
 
