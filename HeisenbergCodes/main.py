@@ -5,8 +5,6 @@
 #
 # A collection of calls for example spin chains and calculations.
 # Noise model/device details are setup here as well
-
-# WIP
 ###########################################################################
 
 ###########################################################################
@@ -27,17 +25,22 @@
 
 import HeisenbergModel as hm
 import IBMQSetup as ibmq
+import QuantumSimulation as qs
+import ClassicalSimulation as cs
+import HelpingFunctions as hf
+import math
+import TimeEvolution as te
 
 ###########################################################################
 # Choose to run noisy circuit on real hardware (real_sim), or noise model:
 real_sim = False
 
 # Set up device params here: (shots is always 50000 unless changed in IBMQSetup.)
-device_name = 'ibmq_athens'
+device_name = 'ibmq_ourense'
 setup = ibmq.ibmqSetup(dev_name=device_name)
-device, noise_model, basis_gates, coupling_map, crosstalk_props, dev_name, provider = setup.get_noise_model()
+device, noise_model, basis_gates, coupling_map = setup.get_noise_model()
 simulator = setup.get_simulator()
-dparams = [device, noise_model, basis_gates, simulator, crosstalk_props, real_sim, dev_name, provider]
+dparams = [device, noise_model, basis_gates, simulator, real_sim, coupling_map]
 ###########################################################################
 
 ###################################################################################################
@@ -50,27 +53,26 @@ dparams = [device, noise_model, basis_gates, simulator, crosstalk_props, real_si
 ###################################################################################################
 
 # Testers from TestingOldTrotterCode:
-# 1/ 12 are verified without crosstalk / readout code incorporated
-# TODO this week finish mitigation and verify
-# TODO this week finish structure factor and verify
 # ==================================== TESTERS ==================================================================== >
 
-# TACHINNO FIG 5a  (All Site Magnetization)
+# TACHINNO FIG 5a  (All Site Magnetization) (ourense)
 
-#model = hm.HeisenbergModel(j=1, bg=0, n=2, p='tachinno', eps=0.2, unity=True, dev_params=dparams)
+#model = hm.HeisenbergModel(j=1, bg=0, n=2, p='tachinno', eps=0.2, unity=True, dev_params=dparams, RMfile='ourense_RM_Jan14_AncillaQubit2.txt')
 #model.all_site_magnetization(total_t=35, dt=0.1, psi0=0, hadamard=True)
 
 # ---------------------------------------------------------------------------------------------------------------------
 
-# JOEL FIG 2a  (All Site Magnetization)
+# JOEL FIG 2a  (All Site Magnetization) (casablanca)
+# STICKY REMINDER: enable joel in HelpingFunctions.py 
 
-#model = hm.HeisenbergModel(j=1, bg=0, a=0.5, n=5, open=True, p='joel', eps=0.4, dev_params=dparams)
+#model = hm.HeisenbergModel(j=1, bg=0, a=0.5, n=6, open=True, p='joel', eps=0.23, dev_params=dparams, RMfile='RMArrays/casablanca_RM_Jan14_AncillaQubit2.txt')
 #initstate=model.classical_chain.states - 2
 #model.all_site_magnetization(total_t=80, dt=0.1, psi0=initstate)
 
 # ----------------------------------------------------------------------------------------------------------------------
-# TACCHINO FIG 5b (Occupation Probabilities)
+# TACCHINO FIG 5b (Occupation Probabilities) (ourense)
 
+# This example cannot run anymore without other fixes in helping_functions, due to RM 
 #model = hm.HeisenbergModel(j=1, bg=20, n=3, open=True, trns=False, p='tachinno',#
 #                    ising=False, eps=0.2, unity=True, dev_params=dparams)
 #c = [int(x, 2) for x in ['100', '010', '111']]
@@ -78,37 +80,37 @@ dparams = [device, noise_model, basis_gates, simulator, crosstalk_props, real_si
 
 
 # --------------------------------------------------------------------------------------------------------------------------
-# TACCHINO FIG 7 (Two Point Correlations)
+# TACCHINO FIG 7 (Two Point Correlations) (ourense)
 #model = hm.HeisenbergModel(j=-1, bg=20, n=3, open=True, trns=False, p='tachinno',
-#                 ising=False, eps=0.2, unity=True, dev_params=dparams)
-##model.two_point_correlations(op_order='xx', total_t=330, dt=.01, pairs=[(0,0)], psi0=int('000', 2))
+#                 ising=False, eps=0.3, unity=True, dev_params=dparams, RMfile='RMArrays/ourense_RM_Jan14_AncillaQubit2.txt') #eps was 0.2
+#model.two_point_correlations(op_order='xx', total_t=330, dt=.01, pairs=[(0,0)], psi0=int('000', 2))
 #model.two_point_correlations(op_order='xx', total_t=330, dt=.01, pairs=[(1,0)], psi0=int('000', 2))
 #model.two_point_correlations(op_order='xx', total_t=330, dt=.01, pairs=[(2,0)], psi0=int('000', 2))
 
 
 # ----------------------------------------------------------------------------------------------------------------------
-# TACCHINO FIG 5c (TOTAL MAGNETIZATION)
-# model = hm.HeisenbergModel(j=1, bg=2, n=2, open=True, trns=True, p='tachinno', ising=True, eps=0.2, unity=True, dev_params=dparams)
+# TACCHINO FIG 5c (TOTAL MAGNETIZATION) (ourense)
+# model = hm.HeisenbergModel(j=1, bg=2, n=2, open=True, trns=True, p='tachinno', ising=True, eps=0.2,
+#               unity=True, dev_params=dparams, RMfile='RMArrays/ourense_RM_Jan14_AncillaQubit2.txt')
 # model.total_magnetization(total_t=650, dt=0.01, psi0=0)
 
 # ----------------------------------------------------------------------------------------------------------------------
-# try changing this epsilon again TODO
-# Would be good to choose either 1st or second order from here, TODO
-model = hm.HeisenbergModel(j=-.84746, bg=0, n=4, a=1.0, open=False, unity=True, p='francis', eps=0.1, dev_params=dparams)
-model.two_point_correlations(op_order='xx', total_t=10, dt=.01, pairs=[(1, 1)], psi0=0) #pairs=[(1, 1), (2, 1), (3, 1)]
+# Francis (ourense)
 
+# Correlation Functions
+# model = hm.HeisenbergModel(j=-.84746, bg=0, n=4, a=1.0, open=False, unity=True, p='francis', eps=0.16, dev_params=dparams,
+#                           RMfile='RMArrays/ourense_RM_Jan14_AncillaQubit2.txt')
+# model.two_point_correlations(op_order='xx', total_t=300, dt=.01, pairs=[(1, 1), (2, 1), (3, 1)], psi0=0)
+
+# Francis ferromagnetic DSF (quantum sim)
+model = qs.QuantumSim(j=-.84746, bg=0, a=1.0, n=4, open=False, p='francis', eps=0.16, dev_params=dparams,
+            RMfile='RMArrays/ourense_RM_Jan14_AncillaQubit2.txt')
+model.dynamical_structure_factor(te.first_order_trotter, 300, 0.01,'x', 'x', 0, [-2 * math.pi, 2 * math.pi], [-1, 10])
+
+# Francis ferromagnetic DSF (classical sim)
+# unity has to be false because francis settings remove spin constants, they are redundant
+#model = cs.ClassicalSpinChain(j=-.84746, bg=0, a=1.0, n=8, open=False, unity=False)
+#psi0 = hf.init_spin_state(0, 2 ** 8)
+#model.dynamical_structure_factor(2000, .01, psi0, 'x', 'x', [-2 * math.pi, 2 * math.pi], [-1, 10])
 
 # =====================================================================================================================>
-
-
-# ============================================ RM TESTERS =============================================================>
-# Calls for recording counts in ReadoutMitigation.py
-
-#readout_mitigation_circuits_all(5, 50000, "santiago_RM_Oct20_AllQubits.txt")
-# Used for Tachinno 5a
-#readout_mitigation_circuits_ancilla(5, 100000, "santiago_RM_Oct20_AncillaQubit2.txt", qubit=2)
-# ancilla qubit 2 --- > hardware qubit # 2
-
-# Used for Joel 6-site problem:
-#readout_mitigation_circuits_ancilla(6, 50000, "santiago_RM_Oct20_AncillaQubit2.txt", qubit=2)
-# consider making this a 5-site problem
