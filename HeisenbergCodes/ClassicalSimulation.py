@@ -11,17 +11,18 @@ import numpy as np
 import scipy.sparse as sps
 import HelpingFunctions as hf
 import TimeEvolution as te
+import PlottingFunctions as pf
 
 
 class ClassicalSpinChain:
 
-    def __init__(self, j=0.0, bg=0.0, a=1.0, n=0, open=True, unity=False, ising=False, p='', trns =False):
+    def __init__(self, j=0.0, bg=0.0, a=1.0, n=0, open=True, unity=False, ising=False, trns =False):
 
         ###################################################################################################
         # Params:
         # (j, coupling constant); (bg, magnetic field); (a, anisotropy jz/j);
         # (n, number of sites); (open, whether open-ended chain); (states, number of basis states)
-        # (unity, whether h-bar/2 == 1 (h-bar == 1 elsewise)); (ising, for ising model);
+        # (ising, for ising model);
         # (trns ; transverse ising); (p, for settings related to examples from a specific paper 'p')
         ###################################################################################################
         self.j = j
@@ -32,13 +33,7 @@ class ClassicalSpinChain:
         self.states = 2 ** n
         self.unity = unity
         self.ising = ising
-        self.p = p
         self.trns = trns
-
-        # Spin constant based on reference paper
-        self.spin_constant = 1
-        if self.p in ['tachinno']:
-            self.spin_constant = 2
 
         # Create Hamiltonian matrix:
         self.hamiltonian = sps.lil_matrix(np.zeros([2 ** n, 2 ** n], complex))
@@ -59,7 +54,7 @@ class ClassicalSpinChain:
         for y in neighbors:
             for op in ops:
                 dex = ops.index(op)
-                s1, s2 = hf.spin_op(op, y[0], self.n, self.unity), hf.spin_op(op, y[1], self.n, self.unity) 
+                s1, s2 = hf.spin_op(op, y[0], self.n, self.unity), hf.spin_op(op, y[1], self.n, self.unity)
                 self.hamiltonian += s1.dot(s2) * self.j * multipliers[dex]
                 if dex_terms % 2 == 0:
                     self.even_terms += s1.dot(s2) * self.j * multipliers[dex]
@@ -94,14 +89,16 @@ class ClassicalSpinChain:
         dyn_data_imag = hf.gen_m(len(pairs), total_time)
 
         for t in range(total_time):
+            print(t)
             u, u_dag, psi0_dag = te.classical_te(self.hamiltonian, dt, t, psi0)
             for x in range(len(pairs)):
                 si = hf.spin_op(op_order[0], pairs[x][0], self.n, self.unity)
                 sj = hf.spin_op(op_order[1], pairs[x][1], self.n, self.unity)
                 ket = u_dag.dot(si.dot(u.dot(sj).dot(psi0)))
                 res = psi0_dag.dot(ket).toarray()[0][0]
-                dyn_data_real[x, t] = np.real(res) / (self.spin_constant*2)
-                dyn_data_imag[x, t] = np.imag(res) / (self.spin_constant*2)
+                dyn_data_real[x, t] = np.real(res)
+                dyn_data_imag[x, t] = np.imag(res)
+
         return dyn_data_real, dyn_data_imag
     #####################################################################################
 
@@ -123,11 +120,11 @@ class ClassicalSpinChain:
     def magnetization_per_site_c(self, total_time, dt, psi0, site):
         data = hf.gen_m(1, total_time)
         for t in range(total_time):
-            u, u_dag, psi0_dag = te.classical_te(self.hamiltonian, dt, t, psi0) # test this function again
+            u, u_dag, psi0_dag = te.classical_te(self.hamiltonian, dt, t, psi0)
             bra = np.conj(u.dot(psi0).transpose())
             s_z = hf.spin_op('z', site, self.n, self.unity)
             ket = s_z.dot(u.dot(psi0))
-            data[0, t] += (bra.dot(ket).toarray()[0][0]) / self.spin_constant
+            data[0, t] += (bra.dot(ket).toarray()[0][0])
         return data
     #####################################################################################
 
@@ -143,3 +140,42 @@ class ClassicalSpinChain:
         for site in range(self.n):
             data = data + self.magnetization_per_site_c(total_time, dt, psi0, site)
         return data
+
+    #####################################################################################
+
+    def dynamical_structure_factor(self, total_time, dt, psi0, alpha, beta, k_range, w_range):
+
+        k_min, k_max, w_min, w_max = k_range[0], k_range[1], w_range[0], w_range[1]
+        res, pairs = 300, []
+        k_, w_ = np.arange(k_min, k_max, (k_max - k_min) / res), np.arange(w_min, w_max, (w_max - w_min) / res)
+        k = np.array(k_.copy().tolist() * res).reshape(res, res).astype('float64')
+        w = np.array(w_.copy().tolist() * res).reshape(res, res).T.astype('float64')
+        for j in range(self.n):
+            for p in range(self.n):
+                pairs.append((j, p))
+
+        tpc_real, tpc_imag = self.two_point_correlations_c(total_time, dt, psi0, [alpha, beta], pairs)
+        dsf = np.zeros_like(k).astype('float64')
+        tpc_real = tpc_real.toarray().astype('float64')
+        tpc_imag = tpc_imag.toarray().astype('float64')
+
+        count = 0
+        for jk in range(len(pairs)):
+            pair = pairs[jk]
+            j = pair[0] - pair[1]
+            print("the code is running!!")
+            theta_one = 1 * k * j
+            time_sum = (np.zeros_like(w) / self.n).astype('float64')
+            for t in range(total_time):
+                tpc_r = tpc_real[count, t]
+                tpc_i = tpc_imag[count, t]
+                theta_two = w * t * dt
+                theta = theta_one + theta_two / 2
+                time_sum += (np.cos(theta) * tpc_r * dt + np.sin(theta) * tpc_i * dt).astype('float64')
+            count += 1
+            dsf = dsf + time_sum
+
+        # Plot ideal data
+        dsf_mod = np.multiply(np.conj(dsf), dsf)
+        pf.dyn_structure_factor_plotter(dsf_mod, w, k, False)
+
