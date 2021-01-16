@@ -4,13 +4,6 @@
 # Updated January '21
 #
 # Codes for matlab plots.
-# Current Qiskit:
-# qiskit 0.21.0
-# qiskit-terra 0.15.2
-# qiskit-aer 0.6.1
-# qiskit-ibmq-provider 0.9.0
-
-# WIP
 ###########################################################################
 
 
@@ -21,7 +14,6 @@ import numpy as np
 import csv
 import HelpingFunctions as hf
 
-# TODO remove gate plots
 # ==================================== Plotting Helpers ============================================================ >
 colors = ['g', 'k', 'maroon', 'mediumblue', 'slateblue', 'limegreen', 'b', 'r', 'olive']
 custom_cycler = (cycler(color=colors) + cycler(lw=[2] * len(colors)))
@@ -249,7 +241,7 @@ def total_magnetization_plotter(j, total_t, dt, data, data_cl):
     data_two_id, data_two_noise = data_two[0], data_two[1]
 
     fig, axs = set_up_axes(2, 2)
-    x1 = [i * j * dt for i in range(total_t)]
+    x1 = [i * abs(j) * dt for i in range(total_t)]
     one, two, cl, gates = axs[0, 0], axs[1, 0], axs[0, 1], axs[1, 1]
     one.plot(x1, data_one_id.toarray()[0][:].tolist(), linestyle='-')
     one.plot(x1, data_one_noise.toarray()[0][:].tolist(), linestyle=":")
@@ -301,7 +293,7 @@ def set_up_axes_two_b(num_axes):
         return fig, ax
 
 
-def all_site_magnetization_plotter_b(n, j, dt, total_t, data_one_noise, data_cl): # Might need to ditch this one, dont know. TODO
+def all_site_magnetization_plotter_b(n, j, dt, total_t, data_one_noise, data_cl):
     # Used with ErrorMitigation Joel2a
     colors_ = ['g', 'k', 'maroon', 'mediumblue', 'slateblue', 'limegreen', 'b', 'r', 'olive']
     fig, ax = set_up_axes_two(1)
@@ -313,4 +305,23 @@ def all_site_magnetization_plotter_b(n, j, dt, total_t, data_one_noise, data_cl)
         sitedex += 1
     plot_dataset_byrows(ax, 'Sites', 'Magnetization', r'$\it{Jt}$')
     fig.suptitle('Magnetization per Site', fontsize=16)
+    plt.show()
+
+
+def dyn_structure_factor_plotter(data, w, k, noisy):
+    matplotlib.rcParams['figure.figsize'] = [5, 5]
+    fig, ax = set_up_axes_two(1)
+    surf = ax.contourf(k, w, data, 300, cmap="magma")
+    fig.colorbar(surf)
+
+    if not noisy:
+        ax.set_title(r'$S(q, \omega) (Ideal) $', size='medium')
+        ax.set_xlabel("q", size='medium')
+        ax.set_ylabel(r'$\omega (J)$', size='medium')
+    else:
+        ax.set_title(r'$S(q, \omega) (First - Order Trotter) $', size='medium')
+        ax.set_xlabel("q", size='medium')
+        ax.set_ylabel(r'$\omega (J)$', size='medium')
+
+    plt.xticks(fontsize='medium')
     plt.show()
