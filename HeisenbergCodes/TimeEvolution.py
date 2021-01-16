@@ -4,11 +4,6 @@
 # Updated January '21
 #
 # Time evolution codes including 1st/2nd-order Suzuki-Trotter
-# Current Qiskit:
-# qiskit 0.21.0
-# qiskit-terra 0.15.2
-# qiskit-aer 0.6.1
-# qiskit-ibmq-provider 0.9.0
 ###########################################################################
 
 import HelpingFunctions as hf
@@ -26,7 +21,7 @@ def classical_te(hamiltonian, dt, t, psi0):
 
 def first_order_trotter(qc, dt, t, ancilla, params):
 
-    [h_commutes, j, eps, spin_constant, n, bg, trns, total_pairs, ising, paper, a] = params
+    [h_commutes, j, eps, sc, n, bg, trns, total_pairs, ising, paper, a, open_chain] = params 
     trotter_steps = 1
     if not h_commutes:
         t_ = t
@@ -42,6 +37,10 @@ def first_order_trotter(qc, dt, t, ancilla, params):
         pseudo_constant_a = 4.0
         mag_constant = 2.0
 
+    # Find relevant pairs and see if they can be split evenly
+    [even_pairs, odd_pairs] = hf.gen_even_odd_pairs(n, open_chain)
+    no_bonds = hf.gen_num_bonds(n, open_chain)
+
     for step in range(trotter_steps):
         for k in range(n):
             if bg != 0.0:
@@ -49,15 +48,22 @@ def first_order_trotter(qc, dt, t, ancilla, params):
                     qc.rx(bg * dt * t / (trotter_steps * mag_constant), k + ancilla)
                 else:
                     qc.rz(bg * dt * t / (trotter_steps * mag_constant), k + ancilla)
-        qc.barrier()
-        for x in total_pairs:
-            qc.barrier()
-            hf.three_cnot_evolution(qc, x, ancilla, j, t, dt, trotter_steps * pseudo_constant_a, ising, a)
+
+        if no_bonds % 2 == 0:
+            # It is possible to split to two noncommuting groups without redundant subroutines
+            hf.grouped_three_cnot_evolution(qc, even_pairs, ancilla, j, t, dt, trotter_steps * pseudo_constant_a, ising, a)
+            hf.grouped_three_cnot_evolution(qc, odd_pairs, ancilla, j, t, dt, trotter_steps * pseudo_constant_a, ising, a)
+        else:
+            # Do the normal routine
+            for x in total_pairs:
+                qc.barrier()
+                hf.three_cnot_evolution(qc, x, ancilla, j, t, dt, trotter_steps * pseudo_constant_a, ising, a)
+
 
 
 def second_order_trotter(qc, dt, t, ancilla, params):
 
-    [h_commutes, j, eps, spin_constant, n, bg, trns, total_pairs, ising, paper, a] = params
+    [h_commutes, j, eps, spin_constant, n, bg, trns, total_pairs, ising, paper, a, open_chain] = params
     trotter_steps = 1
     if not h_commutes:
         t_ = t
@@ -74,6 +80,10 @@ def second_order_trotter(qc, dt, t, ancilla, params):
         pseudo_constant_a = 4.0
         mag_constant = 2.0
 
+    # Find relevant pairs and see if they can be split evenly 
+    [nn_even, nn_odd] = hf.gen_even_odd_pairs(n, open_chain) 
+    no_bonds = hf.gen_num_bonds(n, open_chain)
+
     for step in range(trotter_steps):
 
         for k in range(n):
@@ -83,15 +93,20 @@ def second_order_trotter(qc, dt, t, ancilla, params):
                 else:
                     qc.rz(bg * dt * t / (trotter_steps * mag_constant), k + ancilla)
 
-        for x in reversed(total_pairs[1:]):
+        if no_bonds % 2 == 0: 
+            hf.grouped_three_cnot_evolution(qc, nn_even, ancilla, j, t, dt, trotter_steps * pseudo_constant_a * 2.0, ising, a) 
+            hf.grouped_three_cnot_evolution(qc, nn_odd, ancilla, j, t, dt, trotter_steps * pseudo_constant_a, ising, a)
+            hf.grouped_three_cnot_evolution(qc, nn_even, ancilla, j, t, dt, trotter_steps * pseudo_constant_a * 2.0, ising, a)
+        else: 
+            for x in reversed(total_pairs[1:]):
+                qc.barrier()
+                hf.three_cnot_evolution(qc, x, ancilla, j, t, dt, trotter_steps * pseudo_constant_a * 2, ising, a)
             qc.barrier()
-            hf.three_cnot_evolution(qc, x, ancilla, j, t, dt,
-                trotter_steps * pseudo_constant_a * 2, ising, a)
-        qc.barrier()
-        mid = total_pairs[0]
-        hf.three_cnot_evolution(qc, mid, ancilla, j, t, dt,
-               trotter_steps * pseudo_constant_a, ising, a)
-        for x in total_pairs[1:]:
-            qc.barrier()
-            hf.three_cnot_evolution(qc, x, ancilla, j, t, dt,
-                trotter_steps * pseudo_constant_a * 2.0, ising, a)
+            mid = total_pairs[0]
+            hf.three_cnot_evolution(qc, mid, ancilla, j, t, dt, trotter_steps * pseudo_constant_a, ising, a)
+                   
+            for x in total_pairs[1:]:
+                qc.barrier()
+                hf.three_cnot_evolution(qc, x, ancilla, j, t, dt, trotter_steps * pseudo_constant_a * 2.0, ising, a)
+
+    return 
