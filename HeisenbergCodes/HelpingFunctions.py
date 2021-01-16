@@ -4,13 +4,6 @@
 # Updated January '21
 #
 # General accessory functions, including read/write.
-# Current Qiskit:
-# qiskit 0.21.0
-# qiskit-terra 0.15.2
-# qiskit-aer 0.6.1
-# qiskit-ibmq-provider 0.9.0
-
-# WIP
 ###########################################################################
 
 ###########################################################################
@@ -29,6 +22,8 @@
 # three_cnot_evolution(qc, pair, ancilla, j, t, dt, trotter_steps, ising, a_constant)
 # execute_real(qc, device, shots)
 # run_circuit(anc, qc, noise, ibmq_params, n)
+# gen_even_odd_pairs(n, open_chain)
+# choose_RM(counts, num_qubits, RMfilename, RM=False)
 # write_data(vec, loc)
 # write_numpy_array(array, loc)
 # read_numpy_array(filename)
@@ -41,11 +36,25 @@ import scipy.sparse as sps
 import math
 import csv
 import IBMQSetup as setup
-from qiskit.compiler import transpile
-from qiskit.transpiler.passes import CrosstalkAdaptiveSchedule
-from qiskit.converters import circuit_to_dag
-from qiskit.converters import dag_to_circuit
-import crosstalkAdaptiveScheduleMod as cas
+import ReadoutMitigation as IBU # TODO fixing, mark all parts
+
+# ==================================== Virtual to hardware qubit mappings ============================================ >
+# All examples except Joel use ibmq_ourense
+# Initial layouts format: Virtual is index, physical is the number at the index
+
+# Initial Layouts for Joel magnetization (casablanca) -> ancilla is always hardware 1
+il1 = [1, 2, 3, 0, 4, 5, 6]
+il2 = [1, 0, 2, 3, 4, 5, 6]
+il3 = [1, 5, 0, 2, 3, 4, 6]
+il4 = [1, 4, 6, 0, 2, 3, 5]
+il5 = [1, 4, 5, 6, 0, 2, 3]
+il6 = [1, 3, 4, 5, 6, 0, 2]
+initial_layouts_joel = [il1, il2, il3, il4, il5, il6]
+# To enable joel:
+joel = False
+
+# Initial Layouts for everything else (ourense) --> ancilla is always hardware 2:
+initial_layouts_ee = [2, 1, 0, 3, 4]
 
 
 # ========================================= Pauli matrices and pseudospin operators ================================== >
@@ -199,60 +208,109 @@ def three_cnot_evolution(qc, pair, ancilla, j, t, dt, trotter_steps, ising, a_co
         qc.rx(-math.pi / 2, b_)
 
 
+def grouped_three_cnot_evolution(qc, pairs, ancilla, j, t, dt, trotter_steps, ising, a_constant):
+    # time evolution for isotropic heisenberg and commuting set of pairs even/odd
+    delta = j * t * dt / trotter_steps
+    fixed_pairs = [(pairs[i][0] + ancilla, pairs[i][1] + ancilla) for i in range(len(pairs))]
+    for pair1 in fixed_pairs:
+        qc.cx(pair1[0], pair1[1])
+    qc.barrier()
+    for pair2 in fixed_pairs:
+        qc.rx(2 * delta - math.pi / 2, pair2[0])
+        qc.rz(2 * delta * a_constant, pair2[1])
+        qc.h(pair2[0])
+    qc.barrier()
+    for pair3 in fixed_pairs:
+        qc.cx(pair3[0], pair3[1])
+        qc.h(pair3[0])
+        qc.rz(- 2 * delta, pair3[1])
+    qc.barrier()
+    for pair4 in fixed_pairs:
+        qc.cx(pair4[0], pair4[1])
+        qc.rx(math.pi / 2, pair4[0])
+        qc.rx(-math.pi / 2, pair4[1])
+
+
 def execute_real(qc, device, shots):
     # run circuit on real hardware
     result = execute(qc, backend=device, shots=shots).result()
     return result
 
 
-def run_circuit(anc, qc, noise, ibmq_params, n):
-    [device, nm, bg, simulator, crosstalk_props, real_sim, dev_name, provider] = ibmq_params
+def choose_RM(counts, num_qubits, RMfilename, RM=False):
+    # choose whether to use readout mitigation ---> will be automatic here, but this is old code
+    # counts: counts directly after running the circuit
+    # num_qubits: number of qubits measured
+
+    if RM:
+        probs = sort_counts_no_div(counts[0], num_qubits)
+        probs = IBU.unfold(RMfilename, setup.shots, probs, num_qubits)
+        return probs
+    else: # this doesnt get used anymore
+        probs = sort_counts(counts[0], num_qubits, setup.shots)
+        return probs
+
+
+
+def run_circuit(anc, qc, noise, ibmq_params, n, site, rm_filename):
+    [device, nm, bg, simulator, real_sim, coupling_map] = ibmq_params
     # real_sim: if True, run on the real backend, otherwise noise model.
     shots = setup.shots
 
-    msrd = []
+    # deal w/ layouts
+    initial_layout = []
+    if joel:
+        for l in initial_layouts_joel[site]: 
+            initial_layout.append(l)
+    else:
+        for l in initial_layouts_ee: 
+            initial_layout.append(l)
+
+    # remove items in initial_layout which we do not need.
+    init_layout = initial_layout[:n + 1]
+
+    num_qubits_measured = 0
+
     if anc == 1:
         qc.measure(0, 0)
-        msrd.append(0)
+        num_qubits_measured += 1
     else:
         for x in range(n):
             qc.measure(x, x)
-            msrd.append(x)
+        num_qubits_measured += n
 
-    # Transpile circuit and use adaptive scheduling for the noise model TODO complete adaptive code
-    circ = transpile(qc, backend=device, backend_properties=device.properties())
-    dag = circuit_to_dag(circ)
-
-    # weight factor must be tuned per application
-    pass_ = cas.CrosstalkAdaptiveSchedule(device.properties(), crosstalk_props, provider,
-                                          weight_factor=0.5, dev_name=dev_name)
-    scheduled_dag = pass_.run(dag)
-    scheduled_circ = dag_to_circuit(scheduled_dag)
-    print(scheduled_circ)
     counts = []
     # Ideal simulation :
     if not noise:
-        result = execute(qc, backend=simulator, shots=shots).result()
+        result = execute(qc, backend=simulator, shots=shots, coupling_map=coupling_map, optimization_level=3).result()
         counts += [result.get_counts(i) for i in range(len(result.results))]
     # Noise model or hardware:
     else:
         if real_sim:
-            result = execute_real(scheduled_circ, device, shots)
+            result = execute_real(qc, device, shots)
             counts += [result.get_counts(i) for i in range(len(result.results))]
         else:
-            result = execute(scheduled_circ, backend=simulator, shots=shots, noise_model=nm, basis_gates=bg).result()
+            #result = execute(qc, backend=simulator, shots=shots, noise_model=nm, basis_gates=bg).result()
+            ####RM STUFF#####
+            result = execute(qc, backend=simulator, shots=shots, noise_model=nm, basis_gates=bg,
+                         optimization_level=0, initial_layout=init_layout).result()
+            #################
             counts += [result.get_counts(i) for i in range(len(result.results))]
 
+    # old arg: RM is always True here
     if anc == 1:
-        probs = sort_counts(counts[0], anc, shots)
-        return probs[0] - probs[1]
-    else:
-        measurements = sort_counts(counts[0], n, shots)
-        return measurements
+        probs = choose_RM(counts, num_qubits_measured, rm_filename, True)
+        #probs = sort_counts(counts[0], anc, shots)
+        return probs[0] - probs[1] # come back
+    
+    # occupation probabilities will not work anymore, TODO 
+    #else:
+    #    measurements = sort_counts(counts[0], n, shots)
+    #    return measurements
 
 
 def gen_even_odd_pairs(n, open_chain):
-    # Used only for second-order trotter # TODO cant use, unknown error see if fixable
+    # Used only for second-order trotter
     nn_even = []
     nn_odd = []
     for p in range(n - 1):
@@ -266,6 +324,18 @@ def gen_even_odd_pairs(n, open_chain):
         else:
             nn_odd.append((0, n - 1))
     return [nn_even, nn_odd]
+
+
+def gen_num_bonds(n, open):
+    # given a Heisenberg chain length n and choice of open or closed, find number of bonds
+    # for even/odd pair splitting in trotter  -- assumes only next-nearest
+    no_bonds = 0
+    if open:
+        no_bonds += n - 1
+    else:
+        no_bonds += n
+    return no_bonds
+
 
 # =============================== Writing / Reading Helpers ======================================================= >
 
