@@ -2,27 +2,21 @@
 # QuantumSimulation.py
 # Part of HeisenbergCodes
 # Updated January '21
+#
 # Qiskit functions for creating initial state and computing expectation
 # values.
-#
-# Current Qiskit:
-# qiskit 0.21.0
-# qiskit-terra 0.15.2
-# qiskit-aer 0.6.1
-# qiskit-ibmq-provider 0.9.0
-
-# WIP
-############################################################################
+###########################################################################
 
 from qiskit import QuantumCircuit
 import numpy as np
 import ClassicalSimulation as cs
 import HelpingFunctions as hf
-
+import PlottingFunctions as pf
 
 class QuantumSim:
 
-    def __init__(self, j=0.0, bg=0.0, a=1.0, n=0, open=True, trns=False, p='', ising=False, eps=0, dev_params=[]):
+    def __init__(self, j=0.0, bg=0.0, a=1.0, n=0, open=True, trns=False, p='', ising=False, eps=0,
+                 dev_params=[], RMfile=''):
 
         ###################################################################################################
         # Params:
@@ -31,6 +25,7 @@ class QuantumSim:
         # (unity, whether h-bar/2 == 1 (h-bar == 1 elsewise)); (ising, for ising model);
         # (trns; transverse ising); (p, for settings related to examples from a specific paper 'p')
         # (eps, precision for trotter steps); (dev_params, for running circuit)
+        # (RMfile, the filename for RM data)
         ###################################################################################################
 
         self.j = j
@@ -46,6 +41,7 @@ class QuantumSim:
         self.eps = eps
         if self.p == 'francis':
             self.unity = True
+        self.RMfile = RMfile # TODO Remember here
 
         classical_h = cs.ClassicalSpinChain(j=self.j, bg=self.bg, a=self.a, n=self.n, open=self.open, unity=self.unity)
         self.h_commutes = classical_h.test_commuting_matrices()
@@ -62,7 +58,7 @@ class QuantumSim:
 
         # Params for trotter
         self.params = [self.h_commutes, self.j, self.eps, self.spin_constant, self.n, self.bg, self.trns,
-                        self.total_pairs, self.ising, self.p, self.a]
+                        self.total_pairs, self.ising, self.p, self.a, self.open]
     #####################################################################################
 
     def init_state(self, qc, ancilla, psi0):
@@ -84,8 +80,9 @@ class QuantumSim:
         trotter_alg(qc_id, dt, t, 1, self.params)
         hf.choose_control_gate('z', qc_id, 0, site + 1)
         qc_id.h(0)
-        measurement_id = hf.run_circuit(1, qc_id, False, self.device_params, self.n)
-        measurement_noise = hf.run_circuit(1, qc_id, True, self.device_params, self.n)
+        qc_copy = qc_id.copy()
+        measurement_id = hf.run_circuit(1, qc_id, False, self.device_params, self.n, site, self.RMfile)
+        measurement_noise = hf.run_circuit(1, qc_copy, True, self.device_params, self.n, site, self.RMfile)
 
         return measurement_id / self.spin_constant, measurement_noise / self.spin_constant
     #####################################################################################
@@ -129,28 +126,40 @@ class QuantumSim:
         sc = (self.spin_constant * 2)
 
         for pair in chosen_pairs:
+            pair_data_real_id = []
+            pair_data_imag_id = []
+            pair_data_real_noise = []
+            pair_data_imag_noise = []
+
             for t in range(total_t):
                 for j in range(2):
                     qc = QuantumCircuit(self.n + 1, 1)
                     self.init_state(qc, 1, psi0)
                     qc.h(0)
-                    qc.barrier()
                     hf.choose_control_gate(beta, qc, 0, pair[1] + 1)
-                    qc.barrier()
                     trotter_alg(qc, dt, t, 1, self.params)
-                    qc.barrier()
                     hf.choose_control_gate(alpha, qc, 0, pair[0] + 1)
-                    qc.barrier()
                     hf.real_or_imag_measurement(qc, j)
-                    measurement_id = hf.run_circuit(1, qc, False, self.device_params, self.n) / sc
-                    measurement_noise = hf.run_circuit(1, qc, True, self.device_params, self.n) / sc
+                    qc_copy = qc.copy() # have to put this everywhere
+                    measurement_id = hf.run_circuit(1, qc, False, self.device_params, self.n, None, self.RMfile) / sc
+                    measurement_noise = hf.run_circuit(1, qc_copy, True, self.device_params, self.n, None, self.RMfile) / sc
 
                     if j == 0:
                         data_real_id[chosen_pairs.index(pair), t] += measurement_id
                         data_real_noise[chosen_pairs.index(pair), t] += measurement_noise
+                        pair_data_real_id.append(measurement_id)
+                        pair_data_real_noise.append(measurement_noise)
                     elif j == 1:
                         data_imag_id[chosen_pairs.index(pair), t] += measurement_id
                         data_imag_noise[chosen_pairs.index(pair), t] += measurement_noise
+                        pair_data_imag_id.append(measurement_id)
+                        pair_data_imag_noise.append(measurement_noise)
+
+            # Write a bunch of these:
+            hf.write_data(pair_data_real_id, "data_real_id" + str(abs(pair[0] - pair[1])) + ".csv")
+            hf.write_data(pair_data_real_noise, "data_real_noise" + str(abs(pair[0] - pair[1])) + ".csv")
+            hf.write_data(pair_data_imag_id, "data_imag_id" + str(abs(pair[0] - pair[1])) + ".csv")
+            hf.write_data(pair_data_imag_noise, "data_imag_noise" + str(abs(pair[0] - pair[1])) + ".csv")
 
         data_real = [data_real_id, data_real_noise]
         data_imag = [data_imag_id, data_imag_noise]
@@ -162,12 +171,11 @@ class QuantumSim:
         data_noise = hf.gen_m(len(chosen_states), total_time)
         for t in range(total_time):
             qc = QuantumCircuit(self.n, self.n)
-            qc.barrier()
             self.init_state(qc, 0, psi0)
-            qc.barrier()
             trotter_alg(qc, dt, t, 0)
-            measurements_id = hf.run_circuit(0, qc, False, self.device_params, self.n)
-            measurements_noise = hf.run_circuit(0, qc, True, self.device_params, self.n)
+            qc_copy = qc.copy()
+            measurements_id = hf.run_circuit(0, qc, False, self.device_params, self.n, None, self.RMfile)
+            measurements_noise = hf.run_circuit(0, qc_copy, True, self.device_params, self.n, None, self.RMfile)
 
             for x in chosen_states:
                 data_noise[chosen_states.index(x), t] = measurements_noise[x]
@@ -176,3 +184,44 @@ class QuantumSim:
 
         data = [data_id, data_noise]
         return data
+
+    def dynamical_structure_factor(self, trotter_alg, total_t, dt, alpha, beta, psi0, k_range, w_range):
+
+        k_min, k_max, w_min, w_max = k_range[0], k_range[1], w_range[0], w_range[1]
+        res, pairs = 300, []
+        k_, w_ = np.arange(k_min, k_max, (k_max - k_min) / res), np.arange(w_min, w_max, (w_max - w_min) / res)
+        k = np.array(k_.copy().tolist() * res).reshape(res, res).astype('float64')
+        w = np.array(w_.copy().tolist() * res).reshape(res, res).T.astype('float64')
+
+        for j in range(self.n):
+            for p in range(self.n):
+                pairs.append((j, p))
+
+        tpc_real, tpc_imag = self.twoPtCorrelationsQ(trotter_alg, total_t, dt, alpha, beta, pairs, psi0=psi0)
+
+        # using only the noisy data - > exact from classical
+        tpc_real = tpc_real[1].toarray().astype('float64')
+        tpc_imag = tpc_imag[1].toarray().astype('float64')
+        dsf = np.zeros_like(k).astype('float64')
+
+        count = 0
+        for jk in range(len(pairs)):
+            pair = pairs[jk]
+            j = pair[0] - pair[1]
+            print("the code is running!!")
+            theta_one = 1 * k * j
+            time_sum = (np.zeros_like(w) / self.n).astype('float64')
+            for t in range(total_t):
+                tpc_r = tpc_real[count, t]
+                tpc_i = tpc_imag[count, t]
+                theta_two = w * t * dt
+                theta = theta_one + theta_two / 2
+                time_sum += (np.cos(theta) * tpc_r * dt + np.sin(theta) * tpc_i * dt).astype('float64')
+            count += 1
+            dsf = dsf + time_sum
+
+        # Plot noisy data
+        dsf_mod = np.multiply(np.conj(dsf), dsf)
+        pf.dyn_structure_factor_plotter(dsf_mod, w, k, True)
+
+
