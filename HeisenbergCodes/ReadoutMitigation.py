@@ -7,31 +7,86 @@
 # Partially using PyUnfold package
 # sources: https://github.com/jrbourbeau/pyunfold,
 # https://www.theoj.org/joss-papers/joss.00741/10.21105.joss.00741.pdf
-# Current Qiskit:
-# qiskit 0.21.0
-# qiskit-terra 0.15.2
-# qiskit-aer 0.6.1
-# qiskit-ibmq-provider 0.9.0
-
-# WIP
 ###########################################################################
 
-# TODO reinstall pyunfold in the new env
 from pyunfold import iterative_unfold
 from pyunfold.callbacks import Logger
 from qiskit import QuantumCircuit, execute
 import numpy as np
 import math
-import HelpingFunctions as hf
+#import HelpingFunctions as hf
+import csv
+import scipy.sparse as sps
 
 # Delete this part later
 # File storage format : Each row of csv file corresponds to all P(obtain J| true I), and num_shots is part of filename
 
 import IBMQSetup as ibmq
-device_name = 'ibmq_santiago'
+device_name = 'ibmq_ourense'
 setup = ibmq.ibmqSetup(dev_name=device_name)
 device, nm, bg, coupling_map = setup.get_noise_model()
 simulator = setup.get_simulator()
+
+# =============================== Avoiding circular imports from hf ==================================================>
+# The functions are identical
+
+
+def write_data_temp(vec, loc):
+    # write data from a 1d list into a csv file by rows
+    with open(loc,'a',newline='') as csvFile:
+        writer = csv.writer(csvFile)
+        writer.writerow(vec)
+    csvFile.close()
+
+
+def write_numpy_array_temp(array, loc):
+    # write a numpy array into a text file
+    np.savetxt(loc, array, delimiter=",")
+
+casablanca_array = np.array([[9.801999999999999602e-01, 3.685999999999999693e-02],
+                          [1.980000000000000163e-02, 9.631399999999999961e-01]])
+ourense_array = np.array([[9.930600000000000538e-01, 1.905000000000000096e-02],
+                          [6.939999999999999988e-03, 9.809499999999999886e-01]])
+
+def read_numpy_array_temp(filename):
+    # read numpy array from a textfile
+    #lines = np.loadtxt(filename, delimiter=",", unpack=False)
+    # numpy is being insane again.
+    # jerry fix:
+
+    lines = np.array([[0, 0],[0, 0]])
+    if filename == 'RMArrays/ourense_RM_Jan14_AncillaQubit2.txt':
+        lines = lines + ourense_array
+    elif filename == 'RMArrays/casablanca_RM_Jan14_AncillaQubit2.txt':
+        lines = lines + casablanca_array
+
+    return lines
+
+
+def read_var_file_temp(filename):
+    data = []
+    with open(filename, 'r') as csvfile:
+        lines = csv.reader(csvfile, quoting=csv.QUOTE_NONNUMERIC)
+        data += list(lines)
+    csvfile.close()
+    return data
+
+
+def gen_m_temp(leng, steps):
+    # Generate an empty data matrix -- > same as gen_m, circular import issues
+    return sps.lil_matrix(np.zeros([leng, steps]), dtype=complex)
+
+
+def sort_counts_temp(count, qs, shots):
+    # sort counts and divide out shots
+    vec = []
+    for i in range(2 ** qs):
+        binary = np.binary_repr(i).zfill(qs)
+        if binary in count.keys():
+            vec.append(count[binary] / shots)
+        else:
+            vec.append(0.0)
+    return vec
 
 # =================================Circuits to gather readout error data===============================================>
 
@@ -49,7 +104,7 @@ def run_circuit(qc, shots, qubits):
     # run has optimization_level = 0 in order to have preserve chosen ancilla qubit.
     result = execute(qc, backend=simulator, shots=shots, noise_model=nm, basis_gates=bg, optimization_level=0).result()
     counts = [result.get_counts(i) for i in range(len(result.results))]
-    countslist = hf.sort_counts(counts[0], qubits, shots)
+    countslist = sort_counts_temp(counts[0], qubits, shots)
     return countslist
 
 
@@ -58,7 +113,7 @@ def readout_mitigation_circuits_all(num_qubits, shots, filename):
     # num_qubits is the number of qubits on the device, since virtual -- > hardware mapping will have to be handled
     # in SpinChains.py
 
-    data = hf.gen_m(2 ** num_qubits, 2 ** num_qubits).toarray()
+    data = gen_m_temp(2 ** num_qubits, 2 ** num_qubits).toarray()
     for state in range(2 ** num_qubits):
         qc = QuantumCircuit(num_qubits, num_qubits)
         init_state(num_qubits, qc, state)
@@ -68,14 +123,14 @@ def readout_mitigation_circuits_all(num_qubits, shots, filename):
         data[:, state] += np.array(probs).T
 
     # write conditional probabilities to array and store
-    hf.write_numpy_array(np.real(data), filename)
+    write_numpy_array_temp(np.real(data), filename)
 
 
 def readout_mitigation_circuits_ancilla(num_qubits, shots, filename, qubit=0):
     # num_qubits is the number of qubits in the device
     # qubit is the ancilla qubit used (based on coherence times -- has to be manually given)
 
-    data = hf.gen_m(2, 2).toarray()
+    data = gen_m_temp(2, 2).toarray()
 
     # measure state 0
     qc0 = QuantumCircuit(num_qubits, 1)
@@ -91,11 +146,24 @@ def readout_mitigation_circuits_ancilla(num_qubits, shots, filename, qubit=0):
     data[:, 1] += np.array(probs1).T
 
     # write conditional probabilities to array and store
-    hf.write_numpy_array(np.real(data), filename)
+    write_numpy_array_temp(np.real(data), filename)
+
+
+
+# ================================= Calls for recording counts ======================================================>
+
+
+# readout_mitigation_circuits_all(5, 50000, "ourense_RM_Jan14_AllQubits.txt")
+# Used for everything apart from joel
+# readout_mitigation_circuits_ancilla(5, 100000, "ourense_RM_Jan14_AncillaQubit2.txt", qubit=2)
+# ancilla qubit 2 --- > hardware qubit # 2
+
+# Used for Joel 6-site problem:
+# readout_mitigation_circuits_ancilla(6, 50000, "casablanca_RM_Jan14_AncillaQubit2.txt", qubit=1)
+
 
 
 # ================================== PyUnfold for Iterative bayesian unfolding =====================================>
-
 
 def get_efficienties(measured):
     # return efficiencies, efficiencies_err
@@ -116,7 +184,7 @@ def get_measured_err(measured, shots):
 
 
 def get_response_matrix(rm_filename):
-    r_matrix = hf.read_numpy_array(rm_filename)
+    r_matrix = read_numpy_array_temp(rm_filename)
     r_matrix_err = np.zeros_like(r_matrix)
     return r_matrix, r_matrix_err
 
@@ -125,11 +193,9 @@ def unfold(filename, shots, measured, num_qubits):
     # rm_filename: txt file storing the response matrix
     # measured data: for a particular circuit (not normalized)
     # shots: in the measured data
-
     measured_err = get_measured_err(measured, shots)
     r_matrix, r_matrix_err = get_response_matrix(filename)
     efficiencies, efficiencies_err = get_efficienties(measured)
-    print('____')
     unfolded_results = iterative_unfold(data=measured, data_err=measured_err, response=r_matrix,
                                         response_err=r_matrix_err, efficiencies=efficiencies,
                                         efficiencies_err=efficiencies_err, ts='rmd', ts_stopping=0.001,
@@ -137,7 +203,7 @@ def unfold(filename, shots, measured, num_qubits):
 
     temp = unfolded_results['unfolded'] / shots
 
-    r_matrix2 = hf.read_numpy_array(filename)
+    r_matrix2 = read_numpy_array_temp(filename)
 
     num_states = 2 ** num_qubits
     t_vector = [1 / num_states] * num_states
@@ -153,5 +219,4 @@ def unfold(filename, shots, measured, num_qubits):
             for j in range(num_states):
                 sum_j2 += (r_matrix2[j, i] * t_vector[i] / sum_j) * measured[j]
             t_vector[i] = sum_j2
-
     return (((np.array(t_vector) / shots) + temp) * (1 / 2)).tolist()
