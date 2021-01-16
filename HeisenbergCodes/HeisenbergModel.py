@@ -4,13 +4,6 @@
 # Updated January '21
 #
 # Contains HeisenbergModel class
-# Current Qiskit:
-# qiskit 0.21.0
-# qiskit-terra 0.15.2
-# qiskit-aer 0.6.1
-# qiskit-ibmq-provider 0.9.0
-
-# WIP
 ###########################################################################
 
 import numpy as np
@@ -25,19 +18,21 @@ import ClassicalSimulation as cs
 import TimeEvolution as te
 warnings.filterwarnings('ignore')
 
-# TODO Get the functions in this thing to write data. Write a different thing that reads data. Always write data.
 
 
 class HeisenbergModel():
 
     def __init__(self, j=0.0, bg=0.0, a=1.0, n=0, open=True, trns=False, p='', ising=False, eps=0.0, unity=False,
-                 dev_params=[]):
-        cc = cs.ClassicalSpinChain(j=j, bg=bg, a=a, n=n, open=open, unity=unity, ising=ising, p=p, trns=trns)
-        qh = qs.QuantumSim(j=j, bg=bg, a=a, n=n, open=open, trns=trns, p=p, ising=ising, eps=eps, dev_params=dev_params)
+                 dev_params=[], RMfile=''):
+        cc = cs.ClassicalSpinChain(j=j, bg=bg, a=a, n=n, open=open, unity=unity, ising=ising, trns=trns)
+        qh = qs.QuantumSim(j=j, bg=bg, a=a, n=n, open=open, trns=trns, p=p, ising=ising, eps=eps, dev_params=dev_params,
+                           RMfile=RMfile)
         self.classical_chain = cc
         self.quantum_chain = qh
         self.first = te.first_order_trotter
         self.second = te.second_order_trotter
+        self.RMfile = RMfile
+
     #####################################################################################
 
     def all_site_magnetization(self, total_t=0, dt=0, psi0=0, hadamard=False):
@@ -79,9 +74,14 @@ class HeisenbergModel():
         psi0_ = hf.init_spin_state(psi0, self.classical_chain.states)
 
         qchain, cchain = self.quantum_chain, self.classical_chain
-        data_real_one, data_imag_one = qchain.twoPtCorrelationsQ(self.first, total_t, dt, alpha, beta, pairs, psi0=psi0)
-        data_real_two, data_imag_two = qchain.twoPtCorrelationsQ(self.second, total_t, dt, alpha, beta, pairs, psi0=psi0)
+        #data_real_one, data_imag_one = qchain.twoPtCorrelationsQ(self.first, total_t, dt, alpha, beta, pairs, psi0=psi0)
+        #data_real_two, data_imag_two = qchain.twoPtCorrelationsQ(self.second, total_t, dt, alpha, beta, pairs, psi0=psi0)
         data_real_cl, data_imag_cl = cchain.two_point_correlations_c(total_t, dt, psi0_, op_order, pairs=pairs)
+
+        ## Temporary matrices
+        data_real_one, data_imag_one = [[hf.gen_m(len(pairs), total_t), hf.gen_m(len(pairs), total_t)],[hf.gen_m(len(pairs), total_t), hf.gen_m(len(pairs), total_t)]]
+        data_real_two, data_imag_two = [[hf.gen_m(len(pairs), total_t), hf.gen_m(len(pairs), total_t)],[hf.gen_m(len(pairs), total_t), hf.gen_m(len(pairs), total_t)]]
+        ##
 
         j_ = cchain.j
         d_one, d_two = [data_real_one, data_imag_one], [data_real_two, data_imag_two]
@@ -102,4 +102,5 @@ class HeisenbergModel():
         n = self.classical_chain.n
         data = [data_one, data_two]
         ph.occ_plotter(chosen_states, self.classical_chain.j, n, total_t, dt, data, data_cl)
+
 
