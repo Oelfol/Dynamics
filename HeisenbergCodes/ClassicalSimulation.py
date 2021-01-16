@@ -23,7 +23,8 @@ class ClassicalSpinChain:
         # (j, coupling constant); (bg, magnetic field); (a, anisotropy jz/j);
         # (n, number of sites); (open, whether open-ended chain); (states, number of basis states)
         # (ising, for ising model);
-        # (trns ; transverse ising); (p, for settings related to examples from a specific paper 'p')
+        # (trns ; transverse ising); (unity; (bool) true if h-bar/2 is factored out of spin operators for a 
+        # given example) 
         ###################################################################################################
         self.j = j
         self.bg = bg
