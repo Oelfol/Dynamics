@@ -14,9 +14,9 @@ from qiskit import Aer, IBMQ
 # IBMQ.disable_account()
 # Sometimes Provider: IBMQ.enable_account(TOKEN, hub='ibm-q', group='open', project='main')
 
-#TOKEN = ''
+#TOKEN =''
 
-provider =  IBMQ.enable_account()
+provider =  IBMQ.enable_account(#) 
 simulator = Aer.get_backend('qasm_simulator')
 
 # 8192 is standard max for real runs
