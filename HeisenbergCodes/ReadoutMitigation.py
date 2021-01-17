@@ -14,11 +14,9 @@ from pyunfold.callbacks import Logger
 from qiskit import QuantumCircuit, execute
 import numpy as np
 import math
-#import HelpingFunctions as hf
 import csv
 import scipy.sparse as sps
 
-# Delete this part later
 # File storage format : Each row of csv file corresponds to all P(obtain J| true I), and num_shots is part of filename
 
 import IBMQSetup as ibmq
@@ -48,9 +46,10 @@ casablanca_array = np.array([[9.801999999999999602e-01, 3.685999999999999693e-02
 ourense_array = np.array([[9.930600000000000538e-01, 1.905000000000000096e-02],
                           [6.939999999999999988e-03, 9.809499999999999886e-01]])
 
+
 def read_numpy_array_temp(filename):
     # read numpy array from a textfile
-    #lines = np.loadtxt(filename, delimiter=",", unpack=False)
+    # lines = np.loadtxt(filename, delimiter=",", unpack=False)
     # numpy is being insane again.
     # jerry fix:
 
@@ -149,9 +148,7 @@ def readout_mitigation_circuits_ancilla(num_qubits, shots, filename, qubit=0):
     write_numpy_array_temp(np.real(data), filename)
 
 
-
 # ================================= Calls for recording counts ======================================================>
-
 
 # readout_mitigation_circuits_all(5, 50000, "ourense_RM_Jan14_AllQubits.txt")
 # Used for everything apart from joel
@@ -161,9 +158,8 @@ def readout_mitigation_circuits_ancilla(num_qubits, shots, filename, qubit=0):
 # Used for Joel 6-site problem:
 # readout_mitigation_circuits_ancilla(6, 50000, "casablanca_RM_Jan14_AncillaQubit2.txt", qubit=1)
 
-
-
 # ================================== PyUnfold for Iterative bayesian unfolding =====================================>
+
 
 def get_efficienties(measured):
     # return efficiencies, efficiencies_err
