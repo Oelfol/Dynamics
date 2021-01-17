@@ -13,18 +13,18 @@ import ClassicalSimulation as cs
 import HelpingFunctions as hf
 import PlottingFunctions as pf
 
+
 class QuantumSim:
 
-    def __init__(self, j=0.0, bg=0.0, a=1.0, n=0, open=True, trns=False, p='', ising=False, eps=0,
-                 dev_params=[], RMfile=''):
+    def __init__(self, j=0.0, bg=0.0, a=1.0, n=0, open=True, trns=False, ising=False, eps=0,
+                 dev_params=[], RMfile='', unity=False):
 
         ###################################################################################################
         # Params:
         # (j, coupling constant); (bg, magnetic field); (a, anisotropy jz/j);
         # (n, number of sites); (open, whether open-ended chain); (states, number of basis states)
         # (unity, whether h-bar/2 == 1 (h-bar == 1 elsewise)); (ising, for ising model);
-        # (trns; transverse ising); (p, for settings related to examples from a specific paper 'p')
-        # (eps, precision for trotter steps); (dev_params, for running circuit)
+        # (trns; transverse ising); (eps, precision for trotter steps); (dev_params, for running circuit)
         # (RMfile, the filename for RM data)
         ###################################################################################################
 
@@ -35,13 +35,10 @@ class QuantumSim:
         self.a = a
         self.open = open
         self.trns = trns
-        self.p = p
         self.ising = ising
-        self.unity = False
+        self.unity = unity
         self.eps = eps
-        if self.p == 'francis':
-            self.unity = True
-        self.RMfile = RMfile # TODO Remember here
+        self.RMfile = RMfile
 
         classical_h = cs.ClassicalSpinChain(j=self.j, bg=self.bg, a=self.a, n=self.n, open=self.open, unity=self.unity)
         self.h_commutes = classical_h.test_commuting_matrices()
@@ -51,14 +48,14 @@ class QuantumSim:
         # For use with ibmq devices and noise models:
         self.device_params = dev_params
 
-        # Address needed pseudospin constants for particular paper:
+        # Address needed spin constants for particular paper:
         self.spin_constant = 1
-        if self.p in ['joel', 'tachinno']:
+        if not self.unity:
             self.spin_constant = 2
 
         # Params for trotter
         self.params = [self.h_commutes, self.j, self.eps, self.spin_constant, self.n, self.bg, self.trns,
-                        self.total_pairs, self.ising, self.p, self.a, self.open]
+                       self.total_pairs, self.ising, self.a, self.open]
     #####################################################################################
 
     def init_state(self, qc, ancilla, psi0):
@@ -121,17 +118,22 @@ class QuantumSim:
     #####################################################################################
 
     def twoPtCorrelationsQ(self, trotter_alg, total_t, dt, alpha, beta, chosen_pairs, psi0=0):
+
         data_real_id, data_imag_id = hf.gen_m(len(chosen_pairs), total_t), hf.gen_m(len(chosen_pairs), total_t)
         data_real_noise, data_imag_noise = hf.gen_m(len(chosen_pairs), total_t), hf.gen_m(len(chosen_pairs), total_t)
-        sc = (self.spin_constant * 2)
+        sc = self.spin_constant ** 2
 
+        # Remember Ideal measurement is not done for DSF because of run time
+        pairs_countdown = len(chosen_pairs)
         for pair in chosen_pairs:
             pair_data_real_id = []
             pair_data_imag_id = []
             pair_data_real_noise = []
             pair_data_imag_noise = []
-
+            pairs_countdown -= 1
             for t in range(total_t):
+                print("Current Time: ", t, "Time left: ", total_t - t)
+                print("Current Pair: ", pair, "Pairs left: ", pairs_countdown)
                 for j in range(2):
                     qc = QuantumCircuit(self.n + 1, 1)
                     self.init_state(qc, 1, psi0)
@@ -209,19 +211,19 @@ class QuantumSim:
             pair = pairs[jk]
             j = pair[0] - pair[1]
             print("the code is running!!")
-            theta_one = 1 * k * j
+            theta_one = -1 * k * j
             time_sum = (np.zeros_like(w) / self.n).astype('float64')
             for t in range(total_t):
                 tpc_r = tpc_real[count, t]
                 tpc_i = tpc_imag[count, t]
                 theta_two = w * t * dt
-                theta = theta_one + theta_two / 2
+                theta = theta_one + theta_two
                 time_sum += (np.cos(theta) * tpc_r * dt + np.sin(theta) * tpc_i * dt).astype('float64')
             count += 1
             dsf = dsf + time_sum
 
         # Plot noisy data
         dsf_mod = np.multiply(np.conj(dsf), dsf)
-        pf.dyn_structure_factor_plotter(dsf_mod, w, k, True)
+        pf.dyn_structure_factor_plotter(dsf_mod, w, k, True, self.j, k_range, res)
 
 
