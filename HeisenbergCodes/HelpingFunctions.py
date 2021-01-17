@@ -93,6 +93,7 @@ def spin_op(operator, site, n, unity):
     pauli_ops = [(1 / 2) * sx, (1 / 2) * sy, (1 / 2) * sz, plus, minus]
 
     if unity:
+        # set h-bar / 2 == 1 instead of h-bar == 1
         pauli_ops = [sx, sy, sz, 2 * plus, 2 * minus]
 
     if site == (n - 1):
@@ -251,7 +252,6 @@ def choose_RM(counts, num_qubits, RMfilename, RM=False):
         return probs
 
 
-
 def run_circuit(anc, qc, noise, ibmq_params, n, site, rm_filename):
     [device, nm, bg, simulator, real_sim, coupling_map] = ibmq_params
     # real_sim: if True, run on the real backend, otherwise noise model.
@@ -280,28 +280,25 @@ def run_circuit(anc, qc, noise, ibmq_params, n, site, rm_filename):
         num_qubits_measured += n
 
     counts = []
+
     # Ideal simulation :
     if not noise:
         result = execute(qc, backend=simulator, shots=shots, coupling_map=coupling_map, optimization_level=3).result()
         counts += [result.get_counts(i) for i in range(len(result.results))]
+
     # Noise model or hardware:
     else:
         if real_sim:
             result = execute_real(qc, device, shots)
             counts += [result.get_counts(i) for i in range(len(result.results))]
         else:
-            #result = execute(qc, backend=simulator, shots=shots, noise_model=nm, basis_gates=bg).result()
-            ####RM STUFF#####
             result = execute(qc, backend=simulator, shots=shots, noise_model=nm, basis_gates=bg,
                          optimization_level=0, initial_layout=init_layout).result()
-            #################
             counts += [result.get_counts(i) for i in range(len(result.results))]
 
-    # old arg: RM is always True here
     if anc == 1:
         probs = choose_RM(counts, num_qubits_measured, rm_filename, True)
-        #probs = sort_counts(counts[0], anc, shots)
-        return probs[0] - probs[1] # come back
+        return probs[0] - probs[1]
     
     # occupation probabilities will not work anymore, TODO 
     #else:
