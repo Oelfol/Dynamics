@@ -19,14 +19,13 @@ import TimeEvolution as te
 warnings.filterwarnings('ignore')
 
 
-
 class HeisenbergModel():
 
-    def __init__(self, j=0.0, bg=0.0, a=1.0, n=0, open=True, trns=False, p='', ising=False, eps=0.0, unity=False,
+    def __init__(self, j=0.0, bg=0.0, a=1.0, n=0, open=True, trns=False, ising=False, eps=0.0, unity=False,
                  dev_params=[], RMfile=''):
         cc = cs.ClassicalSpinChain(j=j, bg=bg, a=a, n=n, open=open, unity=unity, ising=ising, trns=trns)
-        qh = qs.QuantumSim(j=j, bg=bg, a=a, n=n, open=open, trns=trns, p=p, ising=ising, eps=eps, dev_params=dev_params,
-                           RMfile=RMfile)
+        qh = qs.QuantumSim(j=j, bg=bg, a=a, n=n, open=open, trns=trns, ising=ising, eps=eps, dev_params=dev_params,
+                           RMfile=RMfile, unity=unity)
         self.classical_chain = cc
         self.quantum_chain = qh
         self.first = te.first_order_trotter
@@ -74,13 +73,13 @@ class HeisenbergModel():
         psi0_ = hf.init_spin_state(psi0, self.classical_chain.states)
 
         qchain, cchain = self.quantum_chain, self.classical_chain
-        #data_real_one, data_imag_one = qchain.twoPtCorrelationsQ(self.first, total_t, dt, alpha, beta, pairs, psi0=psi0)
-        #data_real_two, data_imag_two = qchain.twoPtCorrelationsQ(self.second, total_t, dt, alpha, beta, pairs, psi0=psi0)
+        data_real_one, data_imag_one = qchain.twoPtCorrelationsQ(self.first, total_t, dt, alpha, beta, pairs, psi0=psi0)
+        data_real_two, data_imag_two = qchain.twoPtCorrelationsQ(self.second, total_t, dt, alpha, beta, pairs, psi0=psi0)
         data_real_cl, data_imag_cl = cchain.two_point_correlations_c(total_t, dt, psi0_, op_order, pairs=pairs)
 
-        ## Temporary matrices
-        data_real_one, data_imag_one = [[hf.gen_m(len(pairs), total_t), hf.gen_m(len(pairs), total_t)],[hf.gen_m(len(pairs), total_t), hf.gen_m(len(pairs), total_t)]]
-        data_real_two, data_imag_two = [[hf.gen_m(len(pairs), total_t), hf.gen_m(len(pairs), total_t)],[hf.gen_m(len(pairs), total_t), hf.gen_m(len(pairs), total_t)]]
+        ## Temporary matrices -- > for testing
+        #data_real_one, data_imag_one = [[hf.gen_m(len(pairs), total_t), hf.gen_m(len(pairs), total_t)],[hf.gen_m(len(pairs), total_t), hf.gen_m(len(pairs), total_t)]]
+        #data_real_two, data_imag_two = [[hf.gen_m(len(pairs), total_t), hf.gen_m(len(pairs), total_t)],[hf.gen_m(len(pairs), total_t), hf.gen_m(len(pairs), total_t)]]
         ##
 
         j_ = cchain.j
