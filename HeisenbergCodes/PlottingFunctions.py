@@ -14,6 +14,7 @@ import numpy as np
 import csv
 import HelpingFunctions as hf
 
+
 # ==================================== Plotting Helpers ============================================================ >
 colors = ['g', 'k', 'maroon', 'mediumblue', 'slateblue', 'limegreen', 'b', 'r', 'olive']
 custom_cycler = (cycler(color=colors) + cycler(lw=[2] * len(colors)))
@@ -308,20 +309,34 @@ def all_site_magnetization_plotter_b(n, j, dt, total_t, data_one_noise, data_cl)
     plt.show()
 
 
-def dyn_structure_factor_plotter(data, w, k, noisy):
+def dyn_structure_factor_plotter(data, w, k, noisy, j, k_range, res):
     matplotlib.rcParams['figure.figsize'] = [5, 5]
     fig, ax = set_up_axes_two(1)
+
     surf = ax.contourf(k, w, data, 300, cmap="magma")
     fig.colorbar(surf)
 
     if not noisy:
-        ax.set_title(r'$S(q, \omega) (Ideal) $', size='medium')
+        ax.set_title(r'$S(q, \omega)_{Ideal} $', size='medium')
         ax.set_xlabel("q", size='medium')
-        ax.set_ylabel(r'$\omega (J)$', size='medium')
+        ax.set_ylabel(r'$\omega$', size='medium')
     else:
         ax.set_title(r'$S(q, \omega) (First - Order Trotter) $', size='medium')
         ax.set_xlabel("q", size='medium')
-        ax.set_ylabel(r'$\omega (J)$', size='medium')
+        ax.set_ylabel(r'$\omega$', size='medium')
 
-    plt.xticks(fontsize='medium')
+    # tickmarks
+    from basicUnits import radians
+    x = [val * radians for val in np.arange(k_range[0], k_range[1], res)]
+    y = [0 for val in np.arange(k_range[0], k_range[1], res)]
+    ax.plot(x, y, xunits=radians)
+
+    # plot exact curve
+    # Blundells version of J is defined with an extra factor of two, so the overall curve has to be divided by two
+    k_min, k_max = k_range[0], k_range[1]
+    k_ = np.arange(k_min, k_max, (k_max - k_min) / res)
+    y = 2 * abs(j) * (1 - np.cos(k_)) * (1 / 2)
+    plt.plot(k_, y, 'b')
+
+    plt.xticks(fontsize='small')
     plt.show()
