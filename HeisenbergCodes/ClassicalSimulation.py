@@ -22,9 +22,7 @@ class ClassicalSpinChain:
         # Params:
         # (j, coupling constant); (bg, magnetic field); (a, anisotropy jz/j);
         # (n, number of sites); (open, whether open-ended chain); (states, number of basis states)
-        # (ising, for ising model);
-        # (trns ; transverse ising); (unity; (bool) true if h-bar/2 is factored out of spin operators for a 
-        # given example) 
+        # (ising, for ising model); (trns ; transverse ising);  (unity, whether h-bar / 2 == 1)
         ###################################################################################################
         self.j = j
         self.bg = bg
@@ -86,6 +84,7 @@ class ClassicalSpinChain:
         if len(pairs) == 0:
             nn, auto = hf.gen_pairs(self.n, True, self.open)
             pairs = nn + auto
+
         dyn_data_real = hf.gen_m(len(pairs), total_time)
         dyn_data_imag = hf.gen_m(len(pairs), total_time)
 
@@ -157,6 +156,7 @@ class ClassicalSpinChain:
 
         tpc_real, tpc_imag = self.two_point_correlations_c(total_time, dt, psi0, [alpha, beta], pairs)
         dsf = np.zeros_like(k).astype('float64')
+
         tpc_real = tpc_real.toarray().astype('float64')
         tpc_imag = tpc_imag.toarray().astype('float64')
 
@@ -165,18 +165,17 @@ class ClassicalSpinChain:
             pair = pairs[jk]
             j = pair[0] - pair[1]
             print("the code is running!!")
-            theta_one = 1 * k * j
+            theta_one = - 1 * k * j
             time_sum = (np.zeros_like(w) / self.n).astype('float64')
             for t in range(total_time):
                 tpc_r = tpc_real[count, t]
                 tpc_i = tpc_imag[count, t]
                 theta_two = w * t * dt
-                theta = theta_one + theta_two / 2
+                theta = theta_one + theta_two
                 time_sum += (np.cos(theta) * tpc_r * dt + np.sin(theta) * tpc_i * dt).astype('float64')
             count += 1
             dsf = dsf + time_sum
 
-        # Plot ideal data
         dsf_mod = np.multiply(np.conj(dsf), dsf)
-        pf.dyn_structure_factor_plotter(dsf_mod, w, k, False)
+        pf.dyn_structure_factor_plotter(dsf_mod, w, k, False, self.j, k_range, res)
 
