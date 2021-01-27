@@ -6,6 +6,7 @@
 # Contains HeisenbergModel class
 ###########################################################################
 
+from qiskit import QuantumCircuit
 import numpy as np
 import math
 import warnings
@@ -16,6 +17,7 @@ import QuantumSimulation as qs
 import PlottingFunctions as ph
 import ClassicalSimulation as cs
 import TimeEvolution as te
+import TrialVQE
 warnings.filterwarnings('ignore')
 
 
@@ -74,12 +76,12 @@ class HeisenbergModel():
 
         qchain, cchain = self.quantum_chain, self.classical_chain
         data_real_one, data_imag_one = qchain.twoPtCorrelationsQ(self.first, total_t, dt, alpha, beta, pairs, psi0=psi0)
-        data_real_two, data_imag_two = qchain.twoPtCorrelationsQ(self.second, total_t, dt, alpha, beta, pairs, psi0=psi0)
+        #data_real_two, data_imag_two = qchain.twoPtCorrelationsQ(self.second, total_t, dt, alpha, beta, pairs, psi0=psi0)
         data_real_cl, data_imag_cl = cchain.two_point_correlations_c(total_t, dt, psi0_, op_order, pairs=pairs)
 
         ## Temporary matrices -- > for testing
         #data_real_one, data_imag_one = [[hf.gen_m(len(pairs), total_t), hf.gen_m(len(pairs), total_t)],[hf.gen_m(len(pairs), total_t), hf.gen_m(len(pairs), total_t)]]
-        #data_real_two, data_imag_two = [[hf.gen_m(len(pairs), total_t), hf.gen_m(len(pairs), total_t)],[hf.gen_m(len(pairs), total_t), hf.gen_m(len(pairs), total_t)]]
+        data_real_two, data_imag_two = [[hf.gen_m(len(pairs), total_t), hf.gen_m(len(pairs), total_t)],[hf.gen_m(len(pairs), total_t), hf.gen_m(len(pairs), total_t)]]
         ##
 
         j_ = cchain.j
@@ -101,5 +103,24 @@ class HeisenbergModel():
         n = self.classical_chain.n
         data = [data_one, data_two]
         ph.occ_plotter(chosen_states, self.classical_chain.j, n, total_t, dt, data, data_cl)
+    #####################################################################################
 
+    def trial_vqe_hardware_efficient(self, num_updates=0, alpha=0.0, gamma=0.0, c=0.0, a=0.0, noisy=False):
+        qchain, cchain = self.quantum_chain, self.classical_chain
+
+        # pauli circuits correspond to constants by index
+        h_circuits, constants = qchain.pauli_circuits()
+        gs_eval_exact = cchain.gs_eigenvalue()
+        print("Exact Eigenvalue:", gs_eval_exact)
+
+        vqe_1 = TrialVQE.TrialVQE(qchain, h_circuits, constants, 1, num_updates, alpha, gamma, c, a, noisy)
+        data1 = vqe_1.optimize()
+        vqe_2 = TrialVQE.TrialVQE(qchain, h_circuits, constants, 2, num_updates, alpha, gamma, c, a, noisy)
+        data2 = vqe_2.optimize()
+        vqe_3 = TrialVQE.TrialVQE(qchain, h_circuits, constants, 3, num_updates, alpha, gamma, c, a, noisy)
+        data3 =vqe_3.optimize()
+
+        arrays = [data1, data2, data3]
+
+        ph.vqe_plotter(arrays, gs_eval_exact, num_updates)
 
