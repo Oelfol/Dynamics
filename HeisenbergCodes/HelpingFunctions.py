@@ -19,6 +19,8 @@
 # choose_control_gate(choice, qc, c, t)
 # real_or_imag_measurement(qc, j)
 # zz_operation(qc, a, b, delta)
+# heis_pauli_circuit(a, b, num_spins, anc, op)
+# post_rotations(num_spins, op, anc)
 # three_cnot_evolution(qc, pair, ancilla, j, t, dt, trotter_steps, ising, a_constant)
 # execute_real(qc, device, shots)
 # run_circuit(anc, qc, noise, ibmq_params, n)
@@ -36,7 +38,8 @@ import scipy.sparse as sps
 import math
 import csv
 import IBMQSetup as setup
-import ReadoutMitigation as IBU # TODO fixing, mark all parts
+import ReadoutMitigation as IBU
+from qiskit import QuantumCircuit
 
 # ==================================== Virtual to hardware qubit mappings ============================================ >
 # All examples except Joel use ibmq_ourense
@@ -51,7 +54,7 @@ il5 = [1, 4, 5, 6, 0, 2, 3]
 il6 = [1, 3, 4, 5, 6, 0, 2]
 initial_layouts_joel = [il1, il2, il3, il4, il5, il6]
 # To enable joel:
-joel = False
+joel = True
 
 # Initial Layouts for everything else (ourense) --> ancilla is always hardware 2:
 initial_layouts_ee = [2, 1, 0, 3, 4]
@@ -185,10 +188,31 @@ def real_or_imag_measurement(qc, j):
 
 
 def zz_operation(qc, a, b, delta):
-    # Helper for time evolution operator
+    # For time evolution operator
     qc.cx(a, b)
     qc.rz(2 * delta, b)
     qc.cx(a, b)
+
+
+def heis_pauli_circuit(a, b, num_spins, op):
+    # For vqe, obtaining hamiltonian pauli string circuits as controlled gates
+    c, q = 1, num_spins + 1
+    qc = QuantumCircuit(q, c)
+    if op == 'x':
+        qc.cx(0, a + 1)
+        qc.cx(0, b + 1)
+    elif op == 'y':
+        qc.cy(0, a + 1)
+        qc.cy(0, b + 1)
+    elif op == 'z':
+        qc.cz(0, a + 1)
+        qc.cz(0, b + 1)
+
+    # for magnetic field terms: (param b is None)
+    elif op == 'z*':
+        qc.cz(0, a + 1)
+
+    return qc
 
 
 def three_cnot_evolution(qc, pair, ancilla, j, t, dt, trotter_steps, ising, a_constant):
@@ -260,7 +284,7 @@ def run_circuit(anc, qc, noise, ibmq_params, n, site, rm_filename):
     # deal w/ layouts
     initial_layout = []
     if joel:
-        for l in initial_layouts_joel[site]: 
+        for l in initial_layouts_joel[0]: #[site]: # TODO temporary until can do more readout arrays
             initial_layout.append(l)
     else:
         for l in initial_layouts_ee: 
@@ -282,8 +306,8 @@ def run_circuit(anc, qc, noise, ibmq_params, n, site, rm_filename):
     counts = []
 
     # Ideal simulation :
-    if not noise:
-        result = execute(qc, backend=simulator, shots=shots, coupling_map=coupling_map, optimization_level=3).result()
+    if not noise: #coupling_map=coupling_map #optimization_level=3
+        result = execute(qc, backend=simulator, shots=shots).result()
         counts += [result.get_counts(i) for i in range(len(result.results))]
 
     # Noise model or hardware:
@@ -297,7 +321,7 @@ def run_circuit(anc, qc, noise, ibmq_params, n, site, rm_filename):
             counts += [result.get_counts(i) for i in range(len(result.results))]
 
     if anc == 1:
-        probs = choose_RM(counts, num_qubits_measured, rm_filename, True)
+        probs = choose_RM(counts, num_qubits_measured, rm_filename, False) #True) # TODO fix so this is optional
         return probs[0] - probs[1]
     
     # occupation probabilities will not work anymore, TODO 
