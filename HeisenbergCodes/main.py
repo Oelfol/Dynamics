@@ -36,13 +36,18 @@ import TimeEvolution as te
 real_sim = False
 
 # Set up device params here: (shots is always 50000 unless changed in IBMQSetup.)
-device_name = 'ibmq_ourense'
+# ibmq_ourense is down
+device_name = 'ibmq_casablanca'
 setup = ibmq.ibmqSetup(dev_name=device_name)
 device, noise_model, basis_gates, coupling_map = setup.get_noise_model()
 simulator = setup.get_simulator()
 dparams = [device, noise_model, basis_gates, simulator, real_sim, coupling_map]
 ###########################################################################
 
+# TODO obtain new readout arrays since ourense went down, so that hard-coded rm portions can be rewritten
+# TODO SPSA calibration in TrialVQE
+# TODO locate bug in TrialVQE for ferromagnet example
+# TODO make RM optional
 ###################################################################################################
 # Abbreviations:
 # (j, coupling constant); (bg, magnetic field); (a, anisotropy jz/j);
@@ -72,10 +77,11 @@ dparams = [device, noise_model, basis_gates, simulator, real_sim, coupling_map]
 # JOEL FIG 2a  (All Site Magnetization) (casablanca)
 # STICKY REMINDER: enable joel in HelpingFunctions.py 
 
-# model = hm.HeisenbergModel(j=1, bg=0, a=0.5, n=6, open=True, eps=0.23, dev_params=dparams, unity=False,
+#model = hm.HeisenbergModel(j=1, bg=0, a=0.5, n=6, open=True, eps=0.23, dev_params=dparams, unity=False,  # was .23
 #                                                             RMfile='RMArrays/casablanca_RM_Jan14_AncillaQubit2.txt')
-# initstate=model.classical_chain.states - 2
-# model.all_site_magnetization(total_t=80, dt=0.1, psi0=initstate)
+#initstate=model.classical_chain.states - 2
+#model.all_site_magnetization(total_t=40, dt=0.2, psi0=initstate) #(total_t=80, dt=0.1, psi0=initstate)
+
 
 # ----------------------------------------------------------------------------------------------------------------------
 # TACCHINO FIG 5b (Occupation Probabilities) (ourense)
@@ -106,24 +112,42 @@ dparams = [device, noise_model, basis_gates, simulator, real_sim, coupling_map]
 # Francis (ourense)
 
 # Correlation Functions
-model = hm.HeisenbergModel(j=-.84746, bg=0, n=4, a=1.0, open=False, unity=True, eps=0.17, dev_params=dparams,
-                           RMfile='RMArrays/ourense_RM_Jan14_AncillaQubit2.txt')
-model.two_point_correlations(op_order='xx', total_t=400, dt=.01, pairs=[(1, 1), (2, 1), (3, 1)], psi0=0)
+# model = hm.HeisenbergModel(j=-.84746, bg=0, n=4, a=1.0, open=False, unity=True, eps=0.17, dev_params=dparams,
+#                           RMfile='RMArrays/ourense_RM_Jan14_AncillaQubit2.txt')
+# model.two_point_correlations(op_order='xx', total_t=400, dt=.01, pairs=[(1, 1), (2, 1), (3, 1)], psi0=0)
 
 # DSF : Ideal circuits MUST to be toggled off in twoPtCorrelationsQ or it will run too slow
 # They stay in the code to show trotter error
 
 # Francis ferromagnetic DSF (quantum sim) # set unity == false to compare with analytic curve
-# model = qs.QuantumSim(j=-.84746, bg=0, a=1.0, n=4, open=False, unity=False, eps=0.16, dev_params=dparams,
+#model = qs.QuantumSim(j=-.84746, bg=0, a=1.0, n=4, open=False, unity=False, eps=0.18, dev_params=dparams,
 #            RMfile='RMArrays/ourense_RM_Jan14_AncillaQubit2.txt')
-# model.dynamical_structure_factor(te.first_order_trotter, 300, 0.01,'x', 'x', 0, [-2 * math.pi, 2 * math.pi],
+#model.dynamical_structure_factor(te.first_order_trotter, 600, 0.01,'x', 'x', 0, [-2 * math.pi, 2 * math.pi],
 #            [-0.5, 2])
 
 
 # Francis ferromagnetic DSF (classical sim)  # set unity == false to compare with analytic curve
-# model = cs.ClassicalSpinChain(j=-.84746, bg=0, a=1.0, n=4, open=False, unity=False)
-# psi0 = hf.init_spin_state(0, 2 ** 4)
-# model.dynamical_structure_factor(300, .01, psi0, 'x', 'x', [-2 * math.pi, 2 * math.pi], [-0.5, 2])
+#model = cs.ClassicalSpinChain(j=-.84746, bg=0, a=1.0, n=4, open=False, unity=False)
+#psi0 = hf.init_spin_state(0, 2 ** 4)
+#model.dynamical_structure_factor(600, .01, psi0, 'x', 'x', [-2 * math.pi, 2 * math.pi], [-0.5, 2])
+
+# VQE
+model = hm.HeisenbergModel(j=-.84746, bg=0, n=4, a=1.0, open=False, unity=False, eps=0.17, dev_params=dparams,
+                           RMfile='RMArrays/casablanca_RM_Jan14_AncillaQubit2.txt')
+model.trial_vqe_hardware_efficient(num_updates=300, alpha=.3, gamma=.1, c=.01, a=1, noisy=False)
 
 
 # =====================================================================================================================>
+
+# Other experiments
+
+# Correlation Functions
+#model = hm.HeisenbergModel(j=-.84746, bg=10, n=4, a=10.0, open=False, unity=True, eps=0.17, dev_params=dparams,
+#                           RMfile='RMArrays/casablanca_RM_Jan14_AncillaQubit2.txt')
+#model.two_point_correlations(op_order='xx', total_t=400, dt=.01, pairs=[(1, 1), (2, 1), (3, 1)], psi0=0)
+
+#ex1
+#model = HeisenbergModel(j=1, bg=10, a=10, n=4, open=False, epsilon=0.17)
+#model.two_point_correlations(total_t=160, dt=.01, initstate=int('000',2), op_order='xx', pairs=[(0, 0), (1, 0), (2, 0)])
+
+
