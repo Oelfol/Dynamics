@@ -143,18 +143,18 @@ class QuantumSim:
                     hf.choose_control_gate(alpha, qc, 0, pair[0] + 1)
                     hf.real_or_imag_measurement(qc, j)
                     qc_copy = qc.copy() # have to put this everywhere
-                    measurement_id = hf.run_circuit(1, qc, False, self.device_params, self.n, None, self.RMfile) / sc
+                    #measurement_id = hf.run_circuit(1, qc, False, self.device_params, self.n, None, self.RMfile) / sc
                     measurement_noise = hf.run_circuit(1, qc_copy, True, self.device_params, self.n, None, self.RMfile) / sc
 
                     if j == 0:
-                        data_real_id[chosen_pairs.index(pair), t] += measurement_id
+                        #data_real_id[chosen_pairs.index(pair), t] += measurement_id
                         data_real_noise[chosen_pairs.index(pair), t] += measurement_noise
-                        pair_data_real_id.append(measurement_id)
+                        #pair_data_real_id.append(measurement_id)
                         pair_data_real_noise.append(measurement_noise)
                     elif j == 1:
-                        data_imag_id[chosen_pairs.index(pair), t] += measurement_id
+                        #data_imag_id[chosen_pairs.index(pair), t] += measurement_id
                         data_imag_noise[chosen_pairs.index(pair), t] += measurement_noise
-                        pair_data_imag_id.append(measurement_id)
+                        #pair_data_imag_id.append(measurement_id)
                         pair_data_imag_noise.append(measurement_noise)
 
             # Write a bunch of these:
@@ -225,5 +225,27 @@ class QuantumSim:
         # Plot noisy data
         dsf_mod = np.multiply(np.conj(dsf), dsf)
         pf.dyn_structure_factor_plotter(dsf_mod, w, k, True, self.j, k_range, res)
+
+    def pauli_circuits(self):
+        # return circuit objects representing terms in H
+
+        # constants [x, y, z, magnetic]
+        sc = self.spin_constant
+        constants = [self.j / (sc**2), self.j / (sc**2), self.j * self.a / (sc**2), self.bg / sc]
+
+        # gather pauli circuits to match with coefficients
+        x_circuits, y_circuits, z_circuits = [], [], []
+        for pair in self.total_pairs:
+            x_circuits.append(hf.heis_pauli_circuit(pair[0], pair[1], self.n, 'x'))
+            y_circuits.append(hf.heis_pauli_circuit(pair[0], pair[1], self.n, 'y'))
+            z_circuits.append(hf.heis_pauli_circuit(pair[0], pair[1], self.n, 'z'))
+
+        mag_circuits = []
+        if self.bg != 0:
+            for i in range(self.n):
+                mag_circuits.append(hf.heis_pauli_circuit(i, 0, self.n, 'z*'))
+        circs = [x_circuits, y_circuits, z_circuits, mag_circuits]
+
+        return circs, constants
 
 
