@@ -214,13 +214,13 @@ def two_point_correlations_plotter(alpha, beta, j, dt, pairs, data_one, data_two
     p = [i * scaler for i in range(len(real_one_id.toarray()[0][:].tolist()))]
     for x in pairs:
         dx = pairs.index(x)
-        real1.plot(p, real_one_id.toarray()[dx][:].tolist(), label=str(x))
+        #real1.plot(p, real_one_id.toarray()[dx][:].tolist(), label=str(x))
         real1.plot(p, real_one_noise.toarray()[dx][:].tolist(), label=str(x), linestyle=":")
         real2.plot(p, real_two_id.toarray()[dx][:].tolist(), label=str(x))
         real2.plot(p, real_two_noise.toarray()[dx][:].tolist(), label=str(x), linestyle=":")
-        real_cl.plot(p, real_cl_data.toarray()[dx][:].tolist(), label=str(x))
-        im_cl.plot(p, im_cl_data.toarray()[dx][:].tolist(), label=str(x))
-        im1.plot(p, imag_one_id.toarray()[dx][:].tolist(), label=str(x))
+        real1.plot(p, real_cl_data.toarray()[dx][:].tolist(), label=str(x)) # changed from realcl
+        im1.plot(p, im_cl_data.toarray()[dx][:].tolist(), label=str(x)) # changed from imcl
+        #im1.plot(p, imag_one_id.toarray()[dx][:].tolist(), label=str(x))
         im1.plot(p, imag_one_noise.toarray()[dx][:].tolist(), label=str(x), linestyle=":")
         im2.plot(p, imag_two_id.toarray()[dx][:].tolist(), label=str(x))
         im2.plot(p, imag_two_noise.toarray()[dx][:].tolist(), label=str(x), linestyle=":")
@@ -340,3 +340,24 @@ def dyn_structure_factor_plotter(data, w, k, noisy, j, k_range, res):
 
     plt.xticks(fontsize='small')
     plt.show()
+
+
+def vqe_plotter(data, gs_eval_exact, num_updates):
+    matplotlib.rcParams['figure.figsize'] = [5, 5]
+
+    x1 = [i for i in range(num_updates)]
+    y1 = data[0]
+    y2 = data[1]
+    y3 = data[2]
+    gs = [gs_eval_exact for i in range(num_updates)]
+    plt.scatter(x1, gs, marker='^', c='#bcbd22', label='Exact')
+    plt.scatter(x1, y1, marker='^', c='#2ca02c', label='d=1')
+    plt.scatter(x1, y2, marker='^', c='#17becf', label='d=2')
+    plt.scatter(x1, y3, marker='^', c='#8c564b', label='d=3')
+    plt.xlabel('Iteration, k')
+    plt.ylabel('Energy')
+    plt.legend(loc='upper right')
+    plt.xlim(left=-.01)
+    plt.show()
+
+    # TODO later, add stuff to show alpha, beta, c, a in the plot for later reference
