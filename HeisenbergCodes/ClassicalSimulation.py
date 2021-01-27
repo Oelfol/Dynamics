@@ -178,4 +178,10 @@ class ClassicalSpinChain:
 
         dsf_mod = np.multiply(np.conj(dsf), dsf)
         pf.dyn_structure_factor_plotter(dsf_mod, w, k, False, self.j, k_range, res)
+    #####################################################################################
 
+    def gs_eigenvalue(self):
+
+        H = self.hamiltonian.toarray()
+        evals, evect = np.linalg.eigh(H)[0], np.linalg.eigh(H)[1]
+        return evals[0]
