@@ -10,7 +10,7 @@
 ###########################################################################
 
 from pyunfold import iterative_unfold
-from pyunfold.callbacks import Logger
+#from pyunfold.callbacks import Logger
 from qiskit import QuantumCircuit, execute
 import numpy as np
 import math
@@ -194,8 +194,8 @@ def unfold(filename, shots, measured, num_qubits):
     efficiencies, efficiencies_err = get_efficienties(measured)
     unfolded_results = iterative_unfold(data=measured, data_err=measured_err, response=r_matrix,
                                         response_err=r_matrix_err, efficiencies=efficiencies,
-                                        efficiencies_err=efficiencies_err, ts='rmd', ts_stopping=0.001,
-                                        callbacks=[Logger()])
+                                        efficiencies_err=efficiencies_err, ts='rmd', ts_stopping=0.001)
+                                        #callbacks=[Logger()])
 
     temp = unfolded_results['unfolded'] / shots
 
